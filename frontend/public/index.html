@@ -1,0 +1,999 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Colegio Reyes Catolicos - Asistencia</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --rc-dark: #1f2228;
+      --rc-dark-2: #232730;
+      --rc-blue: #123e68;
+      --rc-blue-soft: #dce8f3;
+      --rc-gold: #f1d41d;
+      --rc-gold-dark: #d8bc10;
+      --rc-text: #162031;
+      --rc-bg: #edf1f5;
+      --rc-card: #ffffff;
+      --rc-border: #d5dce6;
+    }
+
+    body {
+      font-family: "Source Sans 3", sans-serif;
+      color: var(--rc-text);
+      background:
+        linear-gradient(90deg, #0f355a 0, #0f355a 20px, var(--rc-bg) 20px, var(--rc-bg) calc(100% - 20px), #0f355a calc(100% - 20px), #0f355a 100%);
+      min-height: 100vh;
+    }
+
+    h1, h2, h3, .tab-btn, .font-bold, .font-semibold {
+      font-family: "Montserrat", sans-serif;
+      letter-spacing: 0.01em;
+    }
+
+    #login-page .bg-white,
+    #app .bg-white {
+      background: var(--rc-card) !important;
+      border: 1px solid var(--rc-border);
+      box-shadow: 0 14px 32px rgba(9, 24, 43, 0.08);
+    }
+
+    #app nav {
+      background: linear-gradient(90deg, var(--rc-dark), var(--rc-dark-2)) !important;
+      border-bottom: 3px solid var(--rc-gold);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+    }
+
+    #app nav.main-nav {
+      background: linear-gradient(90deg, #1b1f27, #232835) !important;
+    }
+
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 9px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #ffe447, var(--rc-gold));
+      border: 1px solid var(--rc-gold-dark);
+      color: #253047;
+      box-shadow: 0 6px 14px rgba(0, 0, 0, 0.24);
+      font-size: 1.1rem;
+    }
+
+    .brand-title {
+      color: #ffffff !important;
+      font-size: 1.25rem;
+      font-weight: 800;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    }
+
+    .brand-subtitle {
+      color: #d6deea !important;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      line-height: 1;
+      margin-top: 2px;
+    }
+
+    #app nav .font-bold,
+    #app nav #user-name,
+    #app nav i,
+    #app nav button {
+      color: #f7f8fb !important;
+    }
+
+    #app > .bg-white.border-b {
+      background: linear-gradient(90deg, #242932, #242932) !important;
+      border-color: #303744 !important;
+    }
+
+    #app .tab-btn {
+      color: #d5dce7 !important;
+      border-color: transparent !important;
+      margin-right: 0.25rem;
+      transition: 0.2s ease;
+    }
+
+    #app .tab-btn:hover {
+      color: #ffffff !important;
+    }
+
+    #app .tab-btn.border-blue-600 {
+      color: var(--rc-gold) !important;
+      border-color: var(--rc-gold) !important;
+    }
+
+    main .rounded-xl {
+      border-radius: 14px;
+    }
+
+    button.bg-blue-600,
+    button.bg-green-600,
+    button.bg-red-600,
+    button.bg-amber-600,
+    button.bg-slate-700 {
+      border: 1px solid transparent;
+      font-weight: 700;
+    }
+
+    button.bg-blue-600 {
+      background: var(--rc-blue) !important;
+      border-color: #0d3152;
+    }
+
+    button.bg-blue-600:hover {
+      background: #0f3457 !important;
+    }
+
+    button.bg-green-600 {
+      background: #1e7f55 !important;
+      border-color: #176a47;
+    }
+
+    button.bg-red-600 {
+      background: #ab2a32 !important;
+      border-color: #8e1e25;
+    }
+
+    button.bg-amber-600,
+    button.bg-slate-700 {
+      background: #3f4653 !important;
+      border-color: #343946;
+    }
+
+    #btn-logout {
+      color: #ffe68a !important;
+    }
+
+    #login-form button[type="submit"] {
+      background: linear-gradient(90deg, var(--rc-gold), #f7de47) !important;
+      color: #2d2a12 !important;
+      border: 1px solid var(--rc-gold-dark);
+      font-weight: 800;
+    }
+
+    input, select, textarea {
+      border-color: #b7c4d3 !important;
+      border-radius: 11px !important;
+      background: #f8fafc;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #1d5486 !important;
+      box-shadow: 0 0 0 3px rgba(18, 62, 104, 0.15);
+      background: #ffffff;
+    }
+
+    thead.bg-slate-50 {
+      background: #e6edf4 !important;
+    }
+
+    tr.border-b:hover {
+      background: #f2f7fc !important;
+    }
+
+    #view-convivencia .bg-amber-50 {
+      background: #f3f0e1 !important;
+      border-color: #d7d0af !important;
+    }
+
+    #view-perfil .bg-amber-50 {
+      background: #f3f0e1 !important;
+      border-color: #d7d0af !important;
+    }
+
+    @media (max-width: 900px) {
+      body {
+        background: var(--rc-bg);
+      }
+
+      #app .border-b .flex {
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900">
+  <!-- Login Page -->
+  <div id="login-page" class="min-h-screen flex items-center justify-center">
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+      <div class="text-center mb-8">
+        <i class="fas fa-school text-4xl text-blue-600 mb-4"></i>
+        <h1 class="text-2xl font-bold">Colegio Reyes Catolicos</h1>
+        <p class="text-slate-600">Ingreso al sistema de asistencia</p>
+      </div>
+      <form id="login-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Usuario</label>
+          <input type="text" id="username" required
+            class="w-full border border-slate-300 rounded-lg px-4 py-2 focus:outline-none focus:ring focus:ring-blue-200">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Contrasena</label>
+          <input type="password" id="password" required
+            class="w-full border border-slate-300 rounded-lg px-4 py-2 focus:outline-none focus:ring focus:ring-blue-200">
+        </div>
+        <p id="login-error" class="text-red-600 text-sm hidden"></p>
+        <button type="submit"
+          class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">
+          Iniciar Sesion
+        </button>
+      </form>
+      <p class="text-center text-sm text-slate-500 mt-4">
+        Credenciales: admin / admin123
+      </p>
+    </div>
+  </div>
+
+  <!-- Main App (hidden until logged in) -->
+  <div id="app" class="hidden">
+    <!-- Navigation -->
+    <nav class="main-nav shadow-lg">
+      <div class="max-w-7xl mx-auto px-4">
+        <div class="flex justify-between h-16">
+          <div class="flex items-center">
+            <div class="brand-logo mr-3" title="Colegio Reyes Catolicos">
+              <i class="fas fa-book-open-reader"></i>
+            </div>
+            <div class="leading-tight">
+              <span class="brand-title">Colegio Reyes Catolicos</span>
+              <p class="brand-subtitle">Sistema de Asistencia</p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-4">
+            <span id="user-name" class="text-sm text-slate-600"></span>
+            <button id="btn-logout" class="text-red-600 hover:text-red-800 text-sm">
+              <i class="fas fa-sign-out-alt mr-1"></i> Cerrar Sesion
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Tab Navigation -->
+    <div class="bg-white border-b">
+      <div class="max-w-7xl mx-auto px-4">
+        <div class="flex space-x-8">
+          <button data-view="salones" class="tab-btn py-4 px-2 border-b-2 border-blue-600 text-blue-600 font-medium">
+            <i class="fas fa-door-open mr-2"></i>Grados
+          </button>
+          <button data-view="estudiantes" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900">
+            <i class="fas fa-users mr-2"></i>Estudiantes
+          </button>
+          <button data-view="perfil" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900">
+            <i class="fas fa-user mr-2"></i>Perfil Estudiante
+          </button>
+          <button data-view="convivencia" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900">
+            <i class="fas fa-handshake mr-2"></i>Convivencia
+          </button>
+          <button data-view="reportes" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900">
+            <i class="fas fa-chart-bar mr-2"></i>Reportes
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content Area -->
+    <main class="max-w-7xl mx-auto px-4 py-8">
+      
+      <!-- Asistencia View -->
+      <div id="view-asistencia" class="view hidden">
+        <div class="grid md:grid-cols-2 gap-8">
+          <!-- Buscar Estudiante -->
+          <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Buscar estudiante</h2>
+            <div class="relative">
+              <input id="buscador" type="text" placeholder="Escribe un nombre..."
+                class="w-full border border-slate-300 rounded-lg px-4 py-2 focus:outline-none focus:ring focus:ring-blue-200"
+                autocomplete="off">
+              <ul id="sugerencias" class="absolute z-10 w-full bg-white border border-slate-200 rounded-lg mt-2 hidden max-h-60 overflow-y-auto"></ul>
+            </div>
+            <div id="seleccion" class="mt-4 text-sm text-slate-600"></div>
+          </div>
+
+          <!-- Registrar Asistencia -->
+          <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Registrar asistencia</h2>
+            <form id="form-asistencia" class="space-y-4">
+              <div class="grid md:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-sm font-medium mb-1">Tipo</label>
+                  <select id="tipo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                    <option value="presente">Presente</option>
+                    <option value="falta">Falta</option>
+                    <option value="retardo">Retardo</option>
+                    <option value="salida">Salida</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">Fecha</label>
+                  <input id="fecha-asistencia" type="date" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">Hora</label>
+                  <input id="hora" type="time" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                </div>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Observacion</label>
+                <textarea id="observacion" class="w-full border border-slate-300 rounded-lg px-4 py-2" rows="2"></textarea>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Foto del tablero</label>
+                <input id="foto" type="file" accept="image/*" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <div id="preview" class="mt-4 hidden">
+                  <img id="preview-img" class="max-h-40 rounded-lg border border-slate-200" alt="Previsualizacion">
+                </div>
+              </div>
+              <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
+                Guardar
+              </button>
+              <p id="estado" class="text-sm"></p>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Salones View -->
+      <div id="view-salones" class="view">
+        <div class="bg-white rounded-xl shadow p-6">
+          <h2 class="text-xl font-semibold mb-4">Registro por Grado/Grupo</h2>
+          
+          <div class="grid md:grid-cols-3 gap-4 mb-6">
+            <div>
+              <label class="block text-sm font-medium mb-1">Grado</label>
+              <select id="salon-grado" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Seleccionar grado</option>
+                <option value="6">6&deg;</option>
+                <option value="7">7&deg;</option>
+                <option value="8">8&deg;</option>
+                <option value="9">9&deg;</option>
+                <option value="10">10&deg;</option>
+                <option value="11">11&deg;</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Grupo</label>
+              <select id="salon-grupo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Seleccionar grupo</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+              </select>
+            </div>
+            <div class="flex items-end">
+              <button id="btn-cargar-salon" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 w-full">
+                Cargar Grado/Grupo
+              </button>
+            </div>
+          </div>
+
+          <div id="salon-content" class="hidden">
+            <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+              <div>
+                <h3 id="salon-titulo" class="text-lg font-semibold"></h3>
+                <p id="salon-info" class="text-sm text-slate-600"></p>
+              </div>
+              <div class="flex flex-wrap gap-2 items-center">
+                <select id="salon-tipo" class="border border-slate-300 rounded-lg px-4 py-2">
+                  <option value="presente">Presente</option>
+                  <option value="falta">Falta</option>
+                  <option value="retardo">Retardo</option>
+                  <option value="salida">Salida</option>
+                </select>
+                <input id="salon-fecha" type="date" class="border border-slate-300 rounded-lg px-4 py-2">
+                <input id="salon-hora" type="time" class="border border-slate-300 rounded-lg px-4 py-2">
+                <button id="btn-registrar-todos" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">
+                  Registrar a todos
+                </button>
+              </div>
+            </div>
+            <p id="salon-estado" class="mt-3 text-sm"></p>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left w-10">
+                      <input type="checkbox" id="seleccionar-todos" class="w-4 h-4">
+                    </th>
+                    <th class="px-4 py-2 text-left">Nombre</th>
+                    <th class="px-4 py-2 text-left">Identificacion</th>
+                    <th class="px-4 py-2 text-center">Estado</th>
+                    <th class="px-4 py-2 text-left">Observacion</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla-salon"></tbody>
+              </table>
+            </div>
+
+            <div class="mt-4 flex justify-end gap-4">
+              <button id="btn-registrar-seleccionados" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">
+                Registrar Asistencia Seleccionados
+              </button>
+            </div>
+          </div>
+
+          <div id="salon-vacio" class="text-center py-8 text-slate-500">
+            <i class="fas fa-door-open text-4xl mb-4"></i>
+            <p>Selecciona un grado y grupo para ver los estudiantes</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Estudiantes View -->
+      <div id="view-estudiantes" class="view hidden">
+        <div class="bg-white rounded-xl shadow p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-semibold">Lista de Estudiantes</h2>
+            <div class="flex gap-2">
+              <button id="btn-importar-csv" class="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800">
+                <i class="fas fa-file-upload mr-2"></i>Importar CSV
+              </button>
+              <button id="btn-nuevo-estudiante" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                <i class="fas fa-plus mr-2"></i>Nuevo Estudiante
+              </button>
+            </div>
+          </div>
+          
+          <!-- Filtros -->
+          <div class="flex gap-4 mb-4">
+            <select id="filtro-grado" class="border border-slate-300 rounded-lg px-4 py-2">
+              <option value="">Todos los grados</option>
+              <option value="6">6&deg;</option>
+              <option value="7">7&deg;</option>
+              <option value="8">8&deg;</option>
+              <option value="9">9&deg;</option>
+              <option value="10">10&deg;</option>
+              <option value="11">11&deg;</option>
+            </select>
+            <select id="filtro-grupo" class="border border-slate-300 rounded-lg px-4 py-2">
+              <option value="">Todos los grupos</option>
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+            </select>
+            <input id="busqueda-estudiante" type="text" placeholder="Buscar..." 
+              class="border border-slate-300 rounded-lg px-4 py-2 flex-1">
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th class="px-4 py-2 text-left">Nombre</th>
+                  <th class="px-4 py-2 text-left">Grado</th>
+                  <th class="px-4 py-2 text-left">Grupo</th>
+                  <th class="px-4 py-2 text-left">Identificacion</th>
+                  <th class="px-4 py-2 text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-estudiantes"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Perfil View -->
+      <div id="view-perfil" class="view hidden">
+        <div class="bg-white rounded-xl shadow p-6">
+          <h2 class="text-xl font-semibold mb-4">Buscar Perfil de Estudiante</h2>
+          <div class="relative max-w-md mb-6">
+            <input id="buscador-perfil" type="text" placeholder="Escribe un nombre..."
+              class="w-full border border-slate-300 rounded-lg px-4 py-2 focus:outline-none focus:ring focus:ring-blue-200">
+            <ul id="sugerencias-perfil" class="absolute z-10 w-full bg-white border border-slate-200 rounded-lg mt-2 hidden max-h-60 overflow-y-auto"></ul>
+          </div>
+
+          <div class="grid md:grid-cols-5 gap-4 mb-6">
+            <div>
+              <label class="block text-sm font-medium mb-1">Grado</label>
+              <select id="perfil-grado" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Seleccionar grado</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Grupo</label>
+              <select id="perfil-grupo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Seleccionar grupo</option>
+              </select>
+            </div>
+            <div class="md:col-span-2">
+              <label class="block text-sm font-medium mb-1">Estudiante por grado/grupo</label>
+              <select id="perfil-estudiante-select" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Selecciona un estudiante</option>
+              </select>
+            </div>
+            <div class="flex items-end">
+              <button id="btn-cargar-perfil-grupo" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 w-full">
+                Cargar Lista
+              </button>
+            </div>
+          </div>
+
+          <div id="perfil-content" class="hidden">
+            <div class="grid md:grid-cols-2 gap-6">
+              <!-- Datos del Estudiante -->
+              <div class="border rounded-lg p-4">
+                <h3 class="font-semibold text-lg mb-3 text-blue-600">Datos del Estudiante</h3>
+                <div id="perfil-datos-estudiante" class="space-y-2"></div>
+              </div>
+
+              <!-- Datos de Padres/Tutores -->
+              <div class="space-y-4">
+                <div class="border rounded-lg p-4">
+                  <h3 class="font-semibold text-lg mb-3 text-green-600">Datos del Padre</h3>
+                  <div id="perfil-datos-padre" class="space-y-2"></div>
+                </div>
+                <div class="border rounded-lg p-4">
+                  <h3 class="font-semibold text-lg mb-3 text-green-600">Datos de la Madre</h3>
+                  <div id="perfil-datos-madre" class="space-y-2"></div>
+                </div>
+                <div class="border rounded-lg p-4">
+                  <h3 class="font-semibold text-lg mb-3 text-purple-600">Datos del Tutor</h3>
+                  <div id="perfil-datos-tutor" class="space-y-2"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Resumen y Convivencia -->
+            <div class="grid md:grid-cols-2 gap-6 mt-6">
+              <div class="border rounded-lg p-4 bg-slate-50">
+                <h3 class="font-semibold text-lg mb-3 text-indigo-600">Resumen de Asistencia</h3>
+                <div id="perfil-resumen-asistencia" class="space-y-2"></div>
+              </div>
+              <div class="border rounded-lg p-4 bg-amber-50">
+                <h3 class="font-semibold text-lg mb-3 text-amber-700">Reporte de Convivencia</h3>
+                <div id="perfil-reporte-convivencia" class="space-y-2"></div>
+              </div>
+            </div>
+
+            <!-- Historial -->
+            <div class="mt-6">
+              <h3 class="font-semibold text-lg mb-3">Historial de Asistencia</h3>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead class="bg-slate-50">
+                    <tr>
+                      <th class="px-4 py-2 text-left">Fecha</th>
+                      <th class="px-4 py-2 text-left">Tipo</th>
+                      <th class="px-4 py-2 text-left">Hora</th>
+                      <th class="px-4 py-2 text-left">Observacion</th>
+                      <th class="px-4 py-2 text-left">Registrado por</th>
+                    </tr>
+                  </thead>
+                  <tbody id="perfil-historial"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Convivencia View -->
+      <div id="view-convivencia" class="view hidden">
+        <div class="bg-white rounded-xl shadow p-6 space-y-6">
+          <h2 class="text-xl font-semibold">Reporte de Convivencia por Estudiante</h2>
+
+          <div class="grid md:grid-cols-4 gap-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">Grado</label>
+              <select id="conv-grado" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Seleccionar grado</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Grupo</label>
+              <select id="conv-grupo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Seleccionar grupo</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Busqueda</label>
+              <input id="conv-busqueda" type="text" placeholder="Nombre o identificacion"
+                class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div class="flex items-end">
+              <button id="btn-cargar-convivencia" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 w-full">
+                Cargar Lista
+              </button>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-5 gap-4">
+            <div class="md:col-span-4">
+              <label class="block text-sm font-medium mb-1">Estudiante</label>
+              <select id="conv-estudiante" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Selecciona un estudiante</option>
+              </select>
+            </div>
+            <div class="flex items-end">
+              <button id="btn-ver-convivencia" class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 w-full">
+                Ver Reporte
+              </button>
+            </div>
+          </div>
+
+          <div id="conv-estado" class="text-sm"></div>
+
+          <div id="conv-content" class="hidden space-y-4">
+            <div id="conv-estudiante-info" class="border rounded-lg p-4 bg-slate-50 text-sm"></div>
+            <div class="border rounded-lg p-6 bg-amber-50">
+              <h3 class="font-semibold text-2xl mb-4 text-amber-700">Reporte de Convivencia</h3>
+              <div id="conv-reporte-convivencia" class="space-y-2"></div>
+            </div>
+            <div class="border rounded-lg p-6 bg-white">
+              <h3 class="font-semibold text-xl mb-4 text-slate-800">Registrar Nuevo Reporte</h3>
+              <form id="form-conv-reporte" class="space-y-4">
+                <div class="grid md:grid-cols-4 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium mb-1">Fecha</label>
+                    <input id="conv-rep-fecha" type="date" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium mb-1">Categoria</label>
+                    <select id="conv-rep-categoria" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                      <option value="convivencia">Convivencia</option>
+                      <option value="disciplinario">Disciplinario</option>
+                      <option value="acoso">Acoso</option>
+                      <option value="agresion">Agresion</option>
+                      <option value="otro">Otro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium mb-1">Gravedad</label>
+                    <select id="conv-rep-gravedad" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                      <option value="baja">Baja</option>
+                      <option value="media" selected>Media</option>
+                      <option value="alta">Alta</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium mb-1">Estado</label>
+                    <select id="conv-rep-estado" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                      <option value="abierto" selected>Abierto</option>
+                      <option value="en seguimiento">En seguimiento</option>
+                      <option value="cerrado">Cerrado</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">Descripcion del reporte</label>
+                  <textarea id="conv-rep-descripcion" required rows="3"
+                    class="w-full border border-slate-300 rounded-lg px-4 py-2"
+                    placeholder="Describe lo ocurrido..."></textarea>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">Acciones / seguimiento</label>
+                  <textarea id="conv-rep-acciones" rows="2"
+                    class="w-full border border-slate-300 rounded-lg px-4 py-2"
+                    placeholder="Acuerdos, llamados, compromisos, etc."></textarea>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <p id="conv-reporte-estado" class="text-sm"></p>
+                  <button type="submit" id="btn-guardar-conv-reporte" class="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700">
+                    Guardar Reporte
+                  </button>
+                </div>
+              </form>
+            </div>
+            <div class="border rounded-lg p-6 bg-slate-50">
+              <h3 class="font-semibold text-xl mb-4 text-slate-800">Historial de Reportes de Convivencia</h3>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead class="bg-white">
+                    <tr>
+                      <th class="px-4 py-2 text-left">Fecha</th>
+                      <th class="px-4 py-2 text-left">Categoria</th>
+                      <th class="px-4 py-2 text-left">Gravedad</th>
+                      <th class="px-4 py-2 text-left">Estado</th>
+                      <th class="px-4 py-2 text-left">Descripcion</th>
+                      <th class="px-4 py-2 text-left">Registrado por</th>
+                    </tr>
+                  </thead>
+                  <tbody id="conv-historial-reportes"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reportes View -->
+      <div id="view-reportes" class="view hidden">
+        <div class="space-y-6">
+          <!-- Estadisticas Generales -->
+          <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Estadisticas Generales</h2>
+            <div class="grid md:grid-cols-4 gap-4 mb-4">
+              <div class="border rounded-lg p-4 text-center">
+                <div class="text-3xl font-bold text-blue-600" id="stat-estudiantes">0</div>
+                <div class="text-sm text-slate-600">Total Estudiantes</div>
+              </div>
+              <div class="border rounded-lg p-4 text-center">
+                <div class="text-3xl font-bold text-red-600" id="stat-faltas">0</div>
+                <div class="text-sm text-slate-600">Total Faltas</div>
+              </div>
+              <div class="border rounded-lg p-4 text-center">
+                <div class="text-3xl font-bold text-yellow-600" id="stat-retardos">0</div>
+                <div class="text-sm text-slate-600">Total Retardos</div>
+              </div>
+              <div class="border rounded-lg p-4 text-center">
+                <div class="text-3xl font-bold text-purple-600" id="stat-salidas">0</div>
+                <div class="text-sm text-slate-600">Total Salidas</div>
+              </div>
+            </div>
+            <div class="flex gap-4">
+              <input type="date" id="fecha-inicio" class="border border-slate-300 rounded-lg px-4 py-2">
+              <input type="date" id="fecha-fin" class="border border-slate-300 rounded-lg px-4 py-2">
+              <button id="btn-actualizar-stats" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                Actualizar
+              </button>
+            </div>
+          </div>
+
+          <!-- Reporte por Grupo -->
+          <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Reporte por Grado/Grupo</h2>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left">Grado</th>
+                    <th class="px-4 py-2 text-left">Grupo</th>
+                    <th class="px-4 py-2 text-center">Estudiantes</th>
+                    <th class="px-4 py-2 text-center text-red-600">Faltas</th>
+                    <th class="px-4 py-2 text-center text-yellow-600">Retardos</th>
+                    <th class="px-4 py-2 text-center text-purple-600">Salidas</th>
+                  </tr>
+                </thead>
+                <tbody id="reporte-grupo"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Reporte General -->
+          <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Reporte General de Estudiantes</h2>
+            <div class="flex gap-4 mb-4">
+              <select id="reporte-grado" class="border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Todos los grados</option>
+              <option value="6">6&deg;</option>
+              <option value="7">7&deg;</option>
+              <option value="8">8&deg;</option>
+              <option value="9">9&deg;</option>
+              <option value="10">10&deg;</option>
+              <option value="11">11&deg;</option>
+              </select>
+              <button id="btn-generar-reporte" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                Generar Reporte
+              </button>
+              <button id="btn-exportar" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                <i class="fas fa-file-excel mr-2"></i>Exportar
+              </button>
+            </div>
+            <div class="overflow-x-auto max-h-96">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th class="px-4 py-2 text-left">Nombre</th>
+                    <th class="px-4 py-2 text-left">Grado</th>
+                    <th class="px-4 py-2 text-left">Grupo</th>
+                    <th class="px-4 py-2 text-center text-red-600">Faltas</th>
+                    <th class="px-4 py-2 text-center text-yellow-600">Retardos</th>
+                    <th class="px-4 py-2 text-center text-purple-600">Salidas</th>
+                    <th class="px-4 py-2 text-center font-bold">Total</th>
+                  </tr>
+                </thead>
+                <tbody id="reporte-general"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal Nuevo/Editar Estudiante -->
+  <div id="modal-estudiante" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4">
+        <h2 id="modal-titulo" class="text-xl font-semibold">Nuevo Estudiante</h2>
+        <button id="btn-cerrar-modal" class="text-slate-500 hover:text-slate-700">
+          <i class="fas fa-times text-xl"></i>
+        </button>
+      </div>
+      <form id="form-estudiante" class="space-y-4">
+        <input type="hidden" id="estudiante-id">
+        
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">Nombre *</label>
+            <input type="text" id="est-nombre" required class="w-full border border-slate-300 rounded-lg px-4 py-2">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Identificacion *</label>
+            <input type="text" id="est-identificacion" required class="w-full border border-slate-300 rounded-lg px-4 py-2">
+          </div>
+        </div>
+        
+        <div class="grid md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">Grado *</label>
+            <select id="est-grado" required class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              <option value="">Seleccionar</option>
+              <option value="6">6&deg;</option>
+              <option value="7">7&deg;</option>
+              <option value="8">8&deg;</option>
+              <option value="9">9&deg;</option>
+              <option value="10">10&deg;</option>
+              <option value="11">11&deg;</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Grupo *</label>
+            <select id="est-grupo" required class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              <option value="">Seleccionar</option>
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Fecha de Nacimiento</label>
+            <input type="date" id="est-fecha-nacimiento" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">Direccion</label>
+            <input type="text" id="est-direccion" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Telefono</label>
+            <input type="text" id="est-telefono" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Email</label>
+            <input type="email" id="est-email" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+          </div>
+        </div>
+
+        <!-- Datos del Padre -->
+        <div class="border rounded-lg p-4 bg-blue-50">
+          <h3 class="font-semibold mb-3">Datos del Padre</h3>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">Nombre</label>
+              <input type="text" id="padre-nombre" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Telefono</label>
+              <input type="text" id="padre-telefono" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Email</label>
+              <input type="email" id="padre-email" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Ocupacion</label>
+              <input type="text" id="padre-ocupacion" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+          </div>
+        </div>
+
+        <!-- Datos de la Madre -->
+        <div class="border rounded-lg p-4 bg-green-50">
+          <h3 class="font-semibold mb-3">Datos de la Madre</h3>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">Nombre</label>
+              <input type="text" id="madre-nombre" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Telefono</label>
+              <input type="text" id="madre-telefono" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Email</label>
+              <input type="email" id="madre-email" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Ocupacion</label>
+              <input type="text" id="madre-ocupacion" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+          </div>
+        </div>
+
+        <!-- Datos del Tutor -->
+        <div class="border rounded-lg p-4 bg-purple-50">
+          <h3 class="font-semibold mb-3">Datos del Tutor (opcional)</h3>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">Nombre</label>
+              <input type="text" id="tutor-nombre" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Telefono</label>
+              <input type="text" id="tutor-telefono" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Email</label>
+              <input type="email" id="tutor-email" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Parentesco</label>
+              <input type="text" id="tutor-parentesco" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-4">
+          <button type="button" id="btn-cancelar-modal" class="bg-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-400">
+            Cancelar
+          </button>
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+            Guardar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Importar CSV -->
+  <div id="modal-importar-csv" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 w-full max-w-2xl">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-semibold">Importar Estudiantes por CSV</h2>
+        <button id="btn-cerrar-importar-csv" class="text-slate-500 hover:text-slate-700">
+          <i class="fas fa-times text-xl"></i>
+        </button>
+      </div>
+
+      <form id="form-importar-csv" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Archivo CSV</label>
+          <input id="archivo-importar-csv" type="file" accept=".csv,text/csv" required
+            class="w-full border border-slate-300 rounded-lg px-4 py-2">
+        </div>
+
+        <label class="flex items-center gap-2 text-sm">
+          <input id="importar-dry-run" type="checkbox" class="w-4 h-4" checked>
+          Solo validar (dry-run), sin guardar cambios
+        </label>
+
+        <p class="text-xs text-slate-500">
+          Columnas requeridas: identificacion, nombre, grado, grupo
+        </p>
+
+        <div id="importar-resultado" class="hidden rounded-lg border p-3 text-sm"></div>
+
+        <div class="flex justify-end gap-3">
+          <button id="btn-cancelar-importar-csv" type="button" class="bg-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-400">
+            Cancelar
+          </button>
+          <button id="btn-procesar-importar-csv" type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+            Procesar CSV
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
+
+
