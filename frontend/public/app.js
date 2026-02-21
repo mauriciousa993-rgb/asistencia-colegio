@@ -637,7 +637,7 @@ function abrirModalImportarCsv() {
   }
   limpiarResultadoImportacionCsv();
   document.getElementById("form-importar-csv").reset();
-  document.getElementById("importar-dry-run").checked = true;
+  document.getElementById("importar-dry-run").checked = false;
   document.getElementById("modal-importar-csv").classList.remove("hidden");
 }
 
