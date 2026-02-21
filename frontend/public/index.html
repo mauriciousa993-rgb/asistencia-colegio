@@ -956,7 +956,7 @@
   <div id="modal-importar-csv" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
     <div class="bg-white rounded-xl p-6 w-full max-w-2xl">
       <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-semibold">Importar Estudiantes por CSV</h2>
+        <h2 class="text-xl font-semibold">Importar Estudiantes (CSV o Excel)</h2>
         <button id="btn-cerrar-importar-csv" class="text-slate-500 hover:text-slate-700">
           <i class="fas fa-times text-xl"></i>
         </button>
@@ -964,8 +964,8 @@
 
       <form id="form-importar-csv" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium mb-1">Archivo CSV</label>
-          <input id="archivo-importar-csv" type="file" accept=".csv,text/csv" required
+          <label class="block text-sm font-medium mb-1">Archivo (CSV o Excel)</label>
+          <input id="archivo-importar-csv" type="file" accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" required
             class="w-full border border-slate-300 rounded-lg px-4 py-2">
         </div>
 
@@ -985,13 +985,14 @@
             Cancelar
           </button>
           <button id="btn-procesar-importar-csv" type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
-            Procesar CSV
+            Procesar archivo
           </button>
         </div>
       </form>
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

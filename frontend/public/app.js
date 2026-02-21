@@ -652,6 +652,42 @@ function limpiarResultadoImportacionCsv() {
   contenedor.innerHTML = "";
 }
 
+function obtenerExtensionArchivo(filename) {
+  const partes = String(filename || "").toLowerCase().split(".");
+  return partes.length > 1 ? partes.pop() : "";
+}
+
+async function convertirArchivoImportacionACsv(file) {
+  const extension = obtenerExtensionArchivo(file.name);
+
+  if (extension === "csv") {
+    return file.text();
+  }
+
+  if (extension === "xlsx" || extension === "xls") {
+    if (!window.XLSX) {
+      throw new Error("No se pudo cargar el lector de Excel. Intenta nuevamente o usa CSV.");
+    }
+
+    const buffer = await file.arrayBuffer();
+    const workbook = window.XLSX.read(buffer, { type: "array" });
+    const primeraHoja = workbook.SheetNames?.[0];
+
+    if (!primeraHoja) {
+      throw new Error("El archivo Excel no contiene hojas para importar.");
+    }
+
+    const worksheet = workbook.Sheets[primeraHoja];
+    return window.XLSX.utils.sheet_to_csv(worksheet, {
+      FS: ",",
+      RS: "\n",
+      blankrows: false
+    });
+  }
+
+  throw new Error("Formato no soportado. Sube un archivo .csv, .xlsx o .xls.");
+}
+
 async function handleImportarCsv(event) {
   event.preventDefault();
 
@@ -662,7 +698,7 @@ async function handleImportarCsv(event) {
 
   if (!inputArchivo.files || !inputArchivo.files.length) {
     contenedor.className = "rounded-lg border border-red-200 bg-red-50 text-red-700 p-3 text-sm";
-    contenedor.textContent = "Debes seleccionar un archivo CSV.";
+    contenedor.textContent = "Debes seleccionar un archivo CSV o Excel.";
     contenedor.classList.remove("hidden");
     return;
   }
@@ -672,7 +708,7 @@ async function handleImportarCsv(event) {
     botonProcesar.textContent = "Procesando...";
 
     const file = inputArchivo.files[0];
-    const csvContent = await file.text();
+    const csvContent = await convertirArchivoImportacionACsv(file);
 
     const response = await fetch(`${API_URL}/estudiantes/importar-csv`, {
       method: "POST",
@@ -711,7 +747,7 @@ async function handleImportarCsv(event) {
     contenedor.classList.remove("hidden");
   } finally {
     botonProcesar.disabled = false;
-    botonProcesar.textContent = "Procesar CSV";
+    botonProcesar.textContent = "Procesar archivo";
   }
 }
 
