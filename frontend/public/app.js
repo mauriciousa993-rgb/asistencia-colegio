@@ -15,6 +15,8 @@ let convivenciaEstudianteActualId = "";
 let convivenciaReporteEditandoId = "";
 let reportesConvivenciaActuales = [];
 let usuariosSistema = [];
+let registrosAsistenciaGestion = [];
+let registroAsistenciaEditando = { registroId: "", estudianteId: "" };
 
 function normalizarTexto(value) {
   return String(value ?? "").replace(/\u00C2/g, "").trim();
@@ -240,6 +242,7 @@ function cambiarVista(vista) {
   } else if (vista === "reportes") {
     cargarEstadisticas();
     cargarReporteGrupo();
+    cargarReportesConvivenciaGestion();
   } else if (vista === "usuarios") {
     cargarUsuarios();
   }
@@ -1760,6 +1763,181 @@ function setupReportes() {
   
   document.getElementById("btn-generar-reporte").addEventListener("click", cargarReporteGeneral);
   document.getElementById("btn-exportar").addEventListener("click", exportarReporte);
+  document.getElementById("btn-cargar-reportes-conv").addEventListener("click", cargarReportesConvivenciaGestion);
+  document.getElementById("reportes-conv-busqueda").addEventListener("input", cargarReportesConvivenciaGestion);
+  document.getElementById("reportes-conv-grado").addEventListener("change", cargarReportesConvivenciaGestion);
+  document.getElementById("reportes-conv-grupo").addEventListener("change", cargarReportesConvivenciaGestion);
+  document.getElementById("reportes-conv-estado-filtro").addEventListener("change", cargarReportesConvivenciaGestion);
+  document.getElementById("reportes-conv-fecha-desde").addEventListener("change", cargarReportesConvivenciaGestion);
+  document.getElementById("reportes-conv-fecha-hasta").addEventListener("change", cargarReportesConvivenciaGestion);
+
+  document.getElementById("btn-cerrar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
+  document.getElementById("btn-cancelar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
+  document.getElementById("form-editar-reporte-conv").addEventListener("submit", guardarEdicionReporteConvivenciaGestion);
+}
+
+function mostrarEstadoReportesConvivenciaGestion(mensaje, color = "slate") {
+  const estado = document.getElementById("reportes-conv-estado");
+  if (!estado) return;
+  estado.textContent = mensaje;
+  estado.className = `text-sm mb-3 text-${color}-600`;
+}
+
+function abrirModalEditarReporteConvivenciaGestion() {
+  document.getElementById("modal-editar-reporte-conv").classList.remove("hidden");
+}
+
+function cerrarModalEditarReporteConvivenciaGestion() {
+  document.getElementById("modal-editar-reporte-conv").classList.add("hidden");
+  document.getElementById("edit-rep-estado-msg").textContent = "";
+  document.getElementById("edit-rep-estado-msg").className = "text-sm";
+  registroAsistenciaEditando = { registroId: "", estudianteId: "" };
+}
+
+function renderTablaReportesConvivenciaGestion(reportes) {
+  const tbody = document.getElementById("tabla-reportes-conv");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  if (!reportes.length) {
+    tbody.innerHTML = "<tr><td colspan='9' class='px-4 py-4 text-center text-slate-500'>No hay registros de asistencia para los filtros aplicados.</td></tr>";
+    return;
+  }
+
+  reportes.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.className = "border-b hover:bg-slate-50";
+    tr.innerHTML = `
+      <td class="px-4 py-2">${r.fecha ? new Date(r.fecha).toLocaleDateString() : "-"}</td>
+      <td class="px-4 py-2">${r.hora || "-"}</td>
+      <td class="px-4 py-2">${r.estudianteNombre || "-"}</td>
+      <td class="px-4 py-2">${formatearGrado(r.grado)}</td>
+      <td class="px-4 py-2">${normalizarGrupo(r.grupo)}</td>
+      <td class="px-4 py-2">${formatearTipoAsistencia(r.tipo)}</td>
+      <td class="px-4 py-2">${r.observacion || "-"}</td>
+      <td class="px-4 py-2">${r.registradoPor || "-"}</td>
+      <td class="px-4 py-2 whitespace-nowrap">
+        <button onclick="editarReporteConvivenciaDesdeReportes('${r.registroId}','${r.estudianteId}')" class="text-yellow-600 hover:text-yellow-800 mr-2" title="Editar">
+          <i class="fas fa-edit"></i>
+        </button>
+        <button onclick="eliminarReporteConvivenciaDesdeReportes('${r.registroId}','${r.estudianteId}')" class="text-red-600 hover:text-red-800" title="Eliminar">
+          <i class="fas fa-trash"></i>
+        </button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function cargarReportesConvivenciaGestion() {
+  try {
+    const params = new URLSearchParams();
+    const grado = document.getElementById("reportes-conv-grado").value;
+    const grupo = document.getElementById("reportes-conv-grupo").value;
+    const tipo = document.getElementById("reportes-conv-estado-filtro").value;
+    const fechaDesde = document.getElementById("reportes-conv-fecha-desde").value;
+    const fechaHasta = document.getElementById("reportes-conv-fecha-hasta").value;
+    const busqueda = document.getElementById("reportes-conv-busqueda").value.trim();
+
+    if (grado) params.append("grado", grado);
+    if (grupo) params.append("grupo", grupo);
+    if (tipo) params.append("tipo", tipo);
+    if (fechaDesde) params.append("fechaDesde", fechaDesde);
+    if (fechaHasta) params.append("fechaHasta", fechaHasta);
+    if (busqueda) params.append("busqueda", busqueda);
+
+    const response = await fetch(`${API_URL}/asistencia/registros?${params.toString()}`, {
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo cargar la lista de reportes.");
+    }
+
+    registrosAsistenciaGestion = Array.isArray(data) ? data : [];
+    renderTablaReportesConvivenciaGestion(registrosAsistenciaGestion);
+    mostrarEstadoReportesConvivenciaGestion(`Se encontraron ${registrosAsistenciaGestion.length} registro(s).`, "green");
+  } catch (error) {
+    renderTablaReportesConvivenciaGestion([]);
+    mostrarEstadoReportesConvivenciaGestion(error.message, "red");
+  }
+}
+
+function editarReporteConvivenciaDesdeReportes(registroId, estudianteId) {
+  const reporte = registrosAsistenciaGestion.find((r) => String(r.registroId) === String(registroId) && String(r.estudianteId) === String(estudianteId));
+  if (!reporte) {
+    mostrarEstadoReportesConvivenciaGestion("No se encontro el registro seleccionado.", "red");
+    return;
+  }
+
+  registroAsistenciaEditando = { registroId: String(registroId), estudianteId: String(estudianteId) };
+  document.getElementById("edit-rep-fecha").value = formatearFechaParaInput(reporte.fecha) || obtenerFechaHoy();
+  document.getElementById("edit-rep-tipo").value = reporte.tipo || "presente";
+  document.getElementById("edit-rep-hora").value = reporte.hora || "";
+  document.getElementById("edit-rep-observacion").value = reporte.observacion || "";
+  document.getElementById("edit-rep-estado-msg").textContent = "";
+  document.getElementById("edit-rep-estado-msg").className = "text-sm";
+  abrirModalEditarReporteConvivenciaGestion();
+}
+
+async function eliminarReporteConvivenciaDesdeReportes(registroId, estudianteId) {
+  if (!confirm("Estas seguro de eliminar este registro de asistencia? Esta accion no se puede deshacer.")) return;
+
+  try {
+    const response = await fetch(`${API_URL}/asistencia/${estudianteId}/${registroId}`, {
+      method: "DELETE",
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo eliminar el registro.");
+    }
+
+    mostrarEstadoReportesConvivenciaGestion("Registro eliminado correctamente.", "green");
+    await cargarReportesConvivenciaGestion();
+  } catch (error) {
+    mostrarEstadoReportesConvivenciaGestion(error.message, "red");
+  }
+}
+
+async function guardarEdicionReporteConvivenciaGestion(event) {
+  event.preventDefault();
+  const { registroId, estudianteId } = registroAsistenciaEditando;
+  if (!registroId || !estudianteId) return;
+
+  const payload = {
+    fecha: document.getElementById("edit-rep-fecha").value,
+    tipo: document.getElementById("edit-rep-tipo").value,
+    hora: document.getElementById("edit-rep-hora").value,
+    observacion: document.getElementById("edit-rep-observacion").value.trim()
+  };
+
+  const estadoMsg = document.getElementById("edit-rep-estado-msg");
+  const btnGuardar = document.getElementById("btn-guardar-modal-editar-reporte-conv");
+  try {
+    btnGuardar.disabled = true;
+    btnGuardar.textContent = "Guardando...";
+    const response = await fetch(`${API_URL}/asistencia/${estudianteId}/${registroId}`, {
+      method: "PUT",
+      headers: getHeaders(),
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo actualizar el registro.");
+    }
+
+    estadoMsg.textContent = "Registro actualizado correctamente.";
+    estadoMsg.className = "text-sm text-green-600";
+    await cargarReportesConvivenciaGestion();
+    setTimeout(() => cerrarModalEditarReporteConvivenciaGestion(), 250);
+  } catch (error) {
+    estadoMsg.textContent = error.message;
+    estadoMsg.className = "text-sm text-red-600";
+  } finally {
+    btnGuardar.disabled = false;
+    btnGuardar.textContent = "Guardar Cambios";
+  }
 }
 
 async function cargarEstadisticas() {

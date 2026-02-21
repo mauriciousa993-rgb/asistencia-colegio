@@ -217,7 +217,9 @@
   <div id="login-page" class="min-h-screen flex items-center justify-center">
     <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
       <div class="text-center mb-8">
-        <i class="fas fa-school text-4xl text-blue-600 mb-4"></i>
+        <div class="brand-logo mx-auto mb-4" title="Colegio Reyes Catolicos">
+          <img src="./logo-login.jpeg" alt="Logo Colegio Reyes Catolicos">
+        </div>
         <h1 class="text-2xl font-bold">Colegio Reyes Catolicos</h1>
         <p class="text-slate-600">Ingreso al sistema de asistencia</p>
       </div>
@@ -252,7 +254,7 @@
         <div class="flex justify-between h-16">
           <div class="flex items-center">
             <div class="brand-logo mr-3" title="Colegio Reyes Catolicos">
-              <img src="./logo-colegio.jpeg" alt="Logo Colegio Reyes Catolicos">
+              <img src="./logo-login.jpeg" alt="Logo Colegio Reyes Catolicos">
             </div>
             <div class="leading-tight">
               <span class="brand-title">Colegio Reyes Catolicos</span>
@@ -903,6 +905,64 @@
               </table>
             </div>
           </div>
+
+          <!-- Gestion de Registros de Asistencia -->
+          <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Lista de Registros de Asistencia</h2>
+            <div class="grid md:grid-cols-6 gap-3 mb-4">
+              <select id="reportes-conv-grado" class="border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Todos los grados</option>
+                <option value="6">6&deg;</option>
+                <option value="7">7&deg;</option>
+                <option value="8">8&deg;</option>
+                <option value="9">9&deg;</option>
+                <option value="10">10&deg;</option>
+                <option value="11">11&deg;</option>
+              </select>
+              <select id="reportes-conv-grupo" class="border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Todos los grupos</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+              </select>
+              <select id="reportes-conv-estado-filtro" class="border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Todos los tipos</option>
+                <option value="presente">Presente</option>
+                <option value="falta">Falta</option>
+                <option value="retardo">Retardo</option>
+                <option value="salida">Permiso</option>
+              </select>
+              <input id="reportes-conv-fecha-desde" type="date" class="border border-slate-300 rounded-lg px-4 py-2" placeholder="Desde">
+              <input id="reportes-conv-fecha-hasta" type="date" class="border border-slate-300 rounded-lg px-4 py-2" placeholder="Hasta">
+              <button id="btn-cargar-reportes-conv" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                Cargar Lista
+              </button>
+            </div>
+            <div class="mb-3">
+              <input id="reportes-conv-busqueda" type="text" placeholder="Buscar por nombre o identificacion del estudiante"
+                class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <p id="reportes-conv-estado" class="text-sm mb-3"></p>
+            <div class="overflow-x-auto max-h-96">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th class="px-4 py-2 text-left">Fecha</th>
+                    <th class="px-4 py-2 text-left">Hora</th>
+                    <th class="px-4 py-2 text-left">Estudiante</th>
+                    <th class="px-4 py-2 text-left">Grado</th>
+                    <th class="px-4 py-2 text-left">Grupo</th>
+                    <th class="px-4 py-2 text-left">Tipo</th>
+                    <th class="px-4 py-2 text-left">Observacion</th>
+                    <th class="px-4 py-2 text-left">Registrado por</th>
+                    <th class="px-4 py-2 text-left">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla-reportes-conv"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -1089,6 +1149,54 @@
           </button>
           <button id="btn-procesar-importar-csv" type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
             Procesar archivo
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Editar Registro de Asistencia (Reportes) -->
+  <div id="modal-editar-reporte-conv" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 w-full max-w-2xl">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-semibold">Editar Registro de Asistencia</h2>
+        <button id="btn-cerrar-modal-editar-reporte-conv" class="text-slate-500 hover:text-slate-700">
+          <i class="fas fa-times text-xl"></i>
+        </button>
+      </div>
+
+      <form id="form-editar-reporte-conv" class="space-y-4">
+        <div class="grid md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">Fecha</label>
+            <input id="edit-rep-fecha" type="date" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Tipo</label>
+            <select id="edit-rep-tipo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              <option value="presente">Presente</option>
+              <option value="falta">Falta</option>
+              <option value="retardo">Retardo</option>
+              <option value="salida">Permiso</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Hora</label>
+            <input id="edit-rep-hora" type="time" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Observacion</label>
+          <textarea id="edit-rep-observacion" rows="3"
+            class="w-full border border-slate-300 rounded-lg px-4 py-2"></textarea>
+        </div>
+        <p id="edit-rep-estado-msg" class="text-sm"></p>
+        <div class="flex justify-end gap-3">
+          <button id="btn-cancelar-modal-editar-reporte-conv" type="button" class="bg-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-400">
+            Cancelar
+          </button>
+          <button id="btn-guardar-modal-editar-reporte-conv" type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+            Guardar Cambios
           </button>
         </div>
       </form>

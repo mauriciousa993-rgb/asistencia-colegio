@@ -171,6 +171,68 @@ function normalizeSeverity(value) {
   return "tipo2";
 }
 
+function normalizeTextForComparison(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function getDateKey(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function hasDuplicateConvivenciaReport(estudiante, candidate, excludeReportId = "") {
+  const targetDate = getDateKey(candidate.fecha);
+  const targetCategoria = normalizeTextForComparison(candidate.categoria);
+  const targetGravedad = normalizeSeverity(candidate.gravedad);
+  const targetEstado = normalizeTextForComparison(candidate.estado);
+  const targetDescripcion = normalizeTextForComparison(candidate.descripcion);
+  const targetAcciones = normalizeTextForComparison(candidate.acciones);
+
+  return (estudiante.reportesConvivencia || []).some((item) => {
+    if (excludeReportId && String(item._id) === String(excludeReportId)) return false;
+    return (
+      getDateKey(item.fecha) === targetDate &&
+      normalizeTextForComparison(item.categoria) === targetCategoria &&
+      normalizeSeverity(item.gravedad) === targetGravedad &&
+      normalizeTextForComparison(item.estado) === targetEstado &&
+      normalizeTextForComparison(item.descripcion) === targetDescripcion &&
+      normalizeTextForComparison(item.acciones) === targetAcciones
+    );
+  });
+}
+
+function normalizeAttendanceType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "presente" || raw === "falta" || raw === "retardo" || raw === "salida") {
+    return raw;
+  }
+  return "";
+}
+
+function hasDuplicateAttendanceRecord(estudiante, candidate, excludeRecordId = "") {
+  const targetDate = getDateKey(candidate.fecha);
+  const targetTipo = normalizeAttendanceType(candidate.tipo);
+  const targetHora = normalizeTextForComparison(candidate.hora);
+  const targetObservacion = normalizeTextForComparison(candidate.observacion);
+
+  return (estudiante.historial || []).some((item) => {
+    if (excludeRecordId && String(item._id) === String(excludeRecordId)) return false;
+    return (
+      getDateKey(item.fecha) === targetDate &&
+      normalizeAttendanceType(item.tipo) === targetTipo &&
+      normalizeTextForComparison(item.hora) === targetHora &&
+      normalizeTextForComparison(item.observacion) === targetObservacion
+    );
+  });
+}
+
 function getUserScope(reqUser) {
   if (!reqUser || reqUser.rol === "admin") return null;
   return {
@@ -584,19 +646,193 @@ app.post("/api/asistencia", autenticarToken, async (req, res) => {
       return res.status(403).json({ error: "No tienes acceso a este estudiante" });
     }
 
-    estudiante.historial.push({
-      fecha,
-      tipo,
-      hora,
-      observacion,
-      fotoUrl,
+    const fechaRegistro = new Date(fecha);
+    if (Number.isNaN(fechaRegistro.getTime())) {
+      return res.status(400).json({ error: "Fecha de asistencia invalida" });
+    }
+
+    const tipoNormalizado = normalizeAttendanceType(tipo);
+    if (!tipoNormalizado) {
+      return res.status(400).json({ error: "Tipo de asistencia invalido" });
+    }
+
+    const nuevoRegistro = {
+      fecha: fechaRegistro,
+      tipo: tipoNormalizado,
+      hora: typeof hora === "string" ? hora.trim() : "",
+      observacion: typeof observacion === "string" ? observacion.trim() : "",
+      fotoUrl: typeof fotoUrl === "string" ? fotoUrl : "",
       registradoPor: req.user.nombre
-    });
+    };
+
+    if (hasDuplicateAttendanceRecord(estudiante, nuevoRegistro)) {
+      return res.status(409).json({ error: "Ya existe un registro de asistencia igual para este estudiante en la misma fecha." });
+    }
+
+    estudiante.historial.push(nuevoRegistro);
 
     await estudiante.save();
     res.status(201).json({ message: "Asistencia registrada" });
   } catch (error) {
     res.status(500).json({ error: "Error al registrar asistencia" });
+  }
+});
+
+app.get("/api/asistencia/registros", autenticarToken, async (req, res) => {
+  try {
+    const { grado, grupo, busqueda, tipo, fechaDesde, fechaHasta } = req.query;
+    const scopeFilter = getScopeFilterOrReject(req, res);
+    if (scopeFilter === null) return;
+
+    const filtro = { ...scopeFilter };
+    const gradoNormalizado = normalizeGrade(grado);
+    const grupoNormalizado = normalizeGroup(grupo);
+
+    if (gradoNormalizado) {
+      if (scopeFilter.grado && scopeFilter.grado !== gradoNormalizado) return res.json([]);
+      filtro.grado = gradoNormalizado;
+    }
+    if (grupoNormalizado) {
+      if (scopeFilter.grupo && scopeFilter.grupo !== grupoNormalizado) return res.json([]);
+      filtro.grupo = grupoNormalizado;
+    }
+
+    if (busqueda) {
+      filtro.$or = [
+        { nombre: { $regex: busqueda, $options: "i" } },
+        { identificacion: { $regex: busqueda, $options: "i" } }
+      ];
+    }
+
+    const tipoFiltro = tipo ? normalizeAttendanceType(tipo) : "";
+    if (tipo && !tipoFiltro) {
+      return res.status(400).json({ error: "Tipo de asistencia invalido" });
+    }
+
+    const fechaDesdeDate = fechaDesde ? new Date(`${fechaDesde}T00:00:00`) : null;
+    const fechaHastaDate = fechaHasta ? new Date(`${fechaHasta}T23:59:59`) : null;
+
+    const estudiantes = await Estudiante.find(filtro)
+      .select("nombre grado grupo identificacion historial");
+
+    const lista = [];
+    estudiantes.forEach((estudiante) => {
+      (estudiante.historial || []).forEach((registro) => {
+        const fechaRegistro = new Date(registro.fecha);
+        if (tipoFiltro && normalizeAttendanceType(registro.tipo) !== tipoFiltro) return;
+        if (fechaDesdeDate && fechaRegistro < fechaDesdeDate) return;
+        if (fechaHastaDate && fechaRegistro > fechaHastaDate) return;
+
+        lista.push({
+          registroId: registro._id,
+          estudianteId: estudiante._id,
+          estudianteNombre: estudiante.nombre,
+          identificacion: estudiante.identificacion,
+          grado: estudiante.grado,
+          grupo: estudiante.grupo,
+          fecha: registro.fecha,
+          tipo: normalizeAttendanceType(registro.tipo),
+          hora: registro.hora || "",
+          observacion: registro.observacion || "",
+          fotoUrl: registro.fotoUrl || "",
+          registradoPor: registro.registradoPor || ""
+        });
+      });
+    });
+
+    lista.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    return res.json(lista);
+  } catch (error) {
+    return res.status(500).json({ error: "Error al obtener lista de registros de asistencia" });
+  }
+});
+
+app.put("/api/asistencia/:estudianteId/:registroId", autenticarToken, async (req, res) => {
+  try {
+    const { estudianteId, registroId } = req.params;
+    const estudiante = await Estudiante.findById(estudianteId);
+    if (!estudiante) {
+      return res.status(404).json({ error: "Estudiante no encontrado" });
+    }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
+    }
+
+    const registro = estudiante.historial.id(registroId);
+    if (!registro) {
+      return res.status(404).json({ error: "Registro de asistencia no encontrado" });
+    }
+
+    const { fecha, tipo, hora, observacion, fotoUrl } = req.body;
+
+    let fechaFinal = registro.fecha;
+    if (typeof fecha === "string" && fecha.trim()) {
+      const fechaRegistro = new Date(fecha);
+      if (Number.isNaN(fechaRegistro.getTime())) {
+        return res.status(400).json({ error: "Fecha de asistencia invalida" });
+      }
+      fechaFinal = fechaRegistro;
+    }
+
+    let tipoFinal = normalizeAttendanceType(registro.tipo);
+    if (typeof tipo === "string" && tipo.trim()) {
+      tipoFinal = normalizeAttendanceType(tipo);
+      if (!tipoFinal) {
+        return res.status(400).json({ error: "Tipo de asistencia invalido" });
+      }
+    }
+
+    const horaFinal = typeof hora === "string" ? hora.trim() : (registro.hora || "");
+    const observacionFinal = typeof observacion === "string" ? observacion.trim() : (registro.observacion || "");
+    const fotoUrlFinal = typeof fotoUrl === "string" ? fotoUrl : (registro.fotoUrl || "");
+
+    if (hasDuplicateAttendanceRecord(estudiante, {
+      fecha: fechaFinal,
+      tipo: tipoFinal,
+      hora: horaFinal,
+      observacion: observacionFinal
+    }, registro._id)) {
+      return res.status(409).json({ error: "Ya existe otro registro de asistencia igual para este estudiante en la misma fecha." });
+    }
+
+    registro.fecha = fechaFinal;
+    registro.tipo = tipoFinal;
+    registro.hora = horaFinal;
+    registro.observacion = observacionFinal;
+    registro.fotoUrl = fotoUrlFinal;
+
+    await estudiante.save();
+    return res.json({
+      message: "Registro de asistencia actualizado",
+      registro
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Error al actualizar registro de asistencia" });
+  }
+});
+
+app.delete("/api/asistencia/:estudianteId/:registroId", autenticarToken, async (req, res) => {
+  try {
+    const { estudianteId, registroId } = req.params;
+    const estudiante = await Estudiante.findById(estudianteId);
+    if (!estudiante) {
+      return res.status(404).json({ error: "Estudiante no encontrado" });
+    }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
+    }
+
+    const indexRegistro = estudiante.historial.findIndex((item) => String(item._id) === String(registroId));
+    if (indexRegistro === -1) {
+      return res.status(404).json({ error: "Registro de asistencia no encontrado" });
+    }
+
+    estudiante.historial.splice(indexRegistro, 1);
+    await estudiante.save();
+
+    return res.json({ message: "Registro de asistencia eliminado" });
+  } catch (error) {
+    return res.status(500).json({ error: "Error al eliminar registro de asistencia" });
   }
 });
 
@@ -641,6 +877,10 @@ app.post("/api/convivencia/reportes", autenticarToken, async (req, res) => {
       registradoPor: req.user.nombre
     };
 
+    if (hasDuplicateConvivenciaReport(estudiante, nuevoReporte)) {
+      return res.status(409).json({ error: "Ya existe un reporte igual para este estudiante en la misma fecha." });
+    }
+
     estudiante.reportesConvivencia.push(nuevoReporte);
     await estudiante.save();
 
@@ -680,6 +920,74 @@ app.get("/api/convivencia/reportes/:estudianteId", autenticarToken, async (req, 
     });
   } catch (error) {
     return res.status(500).json({ error: "Error al obtener reportes de convivencia" });
+  }
+});
+
+app.get("/api/convivencia/reportes", autenticarToken, async (req, res) => {
+  try {
+    const { grado, grupo, busqueda, estado, categoria, fechaDesde, fechaHasta } = req.query;
+    const scopeFilter = getScopeFilterOrReject(req, res);
+    if (scopeFilter === null) return;
+
+    const filtro = { ...scopeFilter };
+    const gradoNormalizado = normalizeGrade(grado);
+    const grupoNormalizado = normalizeGroup(grupo);
+
+    if (gradoNormalizado) {
+      if (scopeFilter.grado && scopeFilter.grado !== gradoNormalizado) return res.json([]);
+      filtro.grado = gradoNormalizado;
+    }
+    if (grupoNormalizado) {
+      if (scopeFilter.grupo && scopeFilter.grupo !== grupoNormalizado) return res.json([]);
+      filtro.grupo = grupoNormalizado;
+    }
+
+    if (busqueda) {
+      filtro.$or = [
+        { nombre: { $regex: busqueda, $options: "i" } },
+        { identificacion: { $regex: busqueda, $options: "i" } }
+      ];
+    }
+
+    const estadoFiltro = normalizeTextForComparison(estado);
+    const categoriaFiltro = normalizeTextForComparison(categoria);
+    const fechaDesdeDate = fechaDesde ? new Date(`${fechaDesde}T00:00:00`) : null;
+    const fechaHastaDate = fechaHasta ? new Date(`${fechaHasta}T23:59:59`) : null;
+
+    const estudiantes = await Estudiante.find(filtro)
+      .select("nombre grado grupo identificacion reportesConvivencia");
+
+    const lista = [];
+    estudiantes.forEach((estudiante) => {
+      (estudiante.reportesConvivencia || []).forEach((reporte) => {
+        const fechaReporte = new Date(reporte.fecha);
+        if (estadoFiltro && normalizeTextForComparison(reporte.estado) !== estadoFiltro) return;
+        if (categoriaFiltro && normalizeTextForComparison(reporte.categoria) !== categoriaFiltro) return;
+        if (fechaDesdeDate && fechaReporte < fechaDesdeDate) return;
+        if (fechaHastaDate && fechaReporte > fechaHastaDate) return;
+
+        lista.push({
+          reporteId: reporte._id,
+          estudianteId: estudiante._id,
+          estudianteNombre: estudiante.nombre,
+          identificacion: estudiante.identificacion,
+          grado: estudiante.grado,
+          grupo: estudiante.grupo,
+          fecha: reporte.fecha,
+          categoria: reporte.categoria || "convivencia",
+          gravedad: normalizeSeverity(reporte.gravedad),
+          estado: reporte.estado || "abierto",
+          descripcion: reporte.descripcion || "",
+          acciones: reporte.acciones || "",
+          registradoPor: reporte.registradoPor || ""
+        });
+      });
+    });
+
+    lista.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    return res.json(lista);
+  } catch (error) {
+    return res.status(500).json({ error: "Error al obtener lista de reportes de convivencia" });
   }
 });
 
@@ -723,11 +1031,29 @@ app.put("/api/convivencia/reportes/:estudianteId/:reporteId", autenticarToken, a
       reporte.fecha = fechaReporte;
     }
 
-    if (typeof categoria === "string" && categoria.trim()) reporte.categoria = categoria;
-    if (typeof gravedad === "string" && gravedad.trim()) reporte.gravedad = normalizeSeverity(gravedad);
-    if (typeof estado === "string" && estado.trim()) reporte.estado = estado;
-    if (typeof descripcion === "string") reporte.descripcion = descripcion.trim();
-    if (typeof acciones === "string") reporte.acciones = acciones.trim();
+    const categoriaFinal = typeof categoria === "string" && categoria.trim() ? categoria : reporte.categoria;
+    const gravedadFinal = typeof gravedad === "string" && gravedad.trim() ? normalizeSeverity(gravedad) : normalizeSeverity(reporte.gravedad);
+    const estadoFinal = typeof estado === "string" && estado.trim() ? estado : reporte.estado;
+    const descripcionFinal = typeof descripcion === "string" ? descripcion.trim() : reporte.descripcion;
+    const accionesFinal = typeof acciones === "string" ? acciones.trim() : reporte.acciones;
+    const fechaFinal = reporte.fecha;
+
+    if (hasDuplicateConvivenciaReport(estudiante, {
+      fecha: fechaFinal,
+      categoria: categoriaFinal,
+      gravedad: gravedadFinal,
+      estado: estadoFinal,
+      descripcion: descripcionFinal,
+      acciones: accionesFinal
+    }, reporte._id)) {
+      return res.status(409).json({ error: "Ya existe otro reporte igual para este estudiante en la misma fecha." });
+    }
+
+    reporte.categoria = categoriaFinal;
+    reporte.gravedad = gravedadFinal;
+    reporte.estado = estadoFinal;
+    reporte.descripcion = descripcionFinal;
+    reporte.acciones = accionesFinal;
 
     await estudiante.save();
     return res.json({
