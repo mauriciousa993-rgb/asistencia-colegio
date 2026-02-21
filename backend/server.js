@@ -88,6 +88,8 @@ const usuarioSchema = new mongoose.Schema({
   password: { type: String, required: true },
   nombre: { type: String, required: true },
   rol: { type: String, enum: ["admin", "profesor"], default: "profesor" },
+  gradoAsignado: { type: String, default: "" },
+  grupoAsignado: { type: String, default: "" },
   fechaCreacion: { type: Date, default: Date.now }
 });
 
@@ -142,7 +144,7 @@ const estudianteSchema = new mongoose.Schema({
         enum: ["convivencia", "disciplinario", "acoso", "agresion", "otro"],
         default: "convivencia"
       },
-      gravedad: { type: String, enum: ["baja", "media", "alta"], default: "media" },
+      gravedad: { type: String, enum: ["tipo1", "tipo2", "tipo3", "baja", "media", "alta"], default: "tipo2" },
       estado: { type: String, enum: ["abierto", "en seguimiento", "cerrado"], default: "abierto" },
       descripcion: { type: String, required: true },
       acciones: { type: String },
@@ -152,6 +154,50 @@ const estudianteSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const Estudiante = mongoose.model("Estudiante", estudianteSchema);
+
+function normalizeGrade(value) {
+  return String(value || "").trim().replace(/[^\dA-Za-z]/g, "");
+}
+
+function normalizeGroup(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizeSeverity(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "tipo1" || raw === "baja") return "tipo1";
+  if (raw === "tipo2" || raw === "media") return "tipo2";
+  if (raw === "tipo3" || raw === "alta") return "tipo3";
+  return "tipo2";
+}
+
+function getUserScope(reqUser) {
+  if (!reqUser || reqUser.rol === "admin") return null;
+  return {
+    grado: normalizeGrade(reqUser.gradoAsignado),
+    grupo: normalizeGroup(reqUser.grupoAsignado)
+  };
+}
+
+function getScopeFilterOrReject(req, res) {
+  const scope = getUserScope(req.user);
+  if (!scope) return {};
+  if (!scope.grado || !scope.grupo) {
+    res.status(403).json({ error: "Tu usuario no tiene grado/grupo asignado. Contacta al administrador." });
+    return null;
+  }
+  return { grado: scope.grado, grupo: scope.grupo };
+}
+
+function canAccessStudent(reqUser, estudiante) {
+  const scope = getUserScope(reqUser);
+  if (!scope) return true;
+  if (!scope.grado || !scope.grupo) return false;
+  return (
+    normalizeGrade(estudiante?.grado) === scope.grado &&
+    normalizeGroup(estudiante?.grupo) === scope.grupo
+  );
+}
 
 // ============ CONEXIÓN A MONGODB ============
 mongoose
@@ -198,8 +244,18 @@ app.post("/api/login", async (req, res) => {
       return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
     }
 
+    const gradoAsignado = normalizeGrade(usuario.gradoAsignado);
+    const grupoAsignado = normalizeGroup(usuario.grupoAsignado);
+
     const token = jwt.sign(
-      { id: usuario._id, username: usuario.username, rol: usuario.rol, nombre: usuario.nombre },
+      {
+        id: usuario._id,
+        username: usuario.username,
+        rol: usuario.rol,
+        nombre: usuario.nombre,
+        gradoAsignado,
+        grupoAsignado
+      },
       JWT_SECRET,
       { expiresIn: "8h" }
     );
@@ -210,7 +266,9 @@ app.post("/api/login", async (req, res) => {
         id: usuario._id,
         username: usuario.username,
         nombre: usuario.nombre,
-        rol: usuario.rol
+        rol: usuario.rol,
+        gradoAsignado,
+        grupoAsignado
       }
     });
   } catch (error) {
@@ -225,7 +283,26 @@ app.post("/api/usuarios", autenticarToken, async (req, res) => {
       return res.status(403).json({ error: "Solo administradores pueden crear usuarios" });
     }
 
-    const { username, password, nombre, rol } = req.body;
+    const {
+      username,
+      password,
+      nombre,
+      rol,
+      gradoAsignado,
+      grupoAsignado
+    } = req.body;
+
+    if (!username || !password || !nombre) {
+      return res.status(400).json({ error: "username, password y nombre son obligatorios" });
+    }
+
+    const rolFinal = rol === "admin" ? "admin" : "profesor";
+    const gradoFinal = rolFinal === "admin" ? "" : normalizeGrade(gradoAsignado);
+    const grupoFinal = rolFinal === "admin" ? "" : normalizeGroup(grupoAsignado);
+
+    if (rolFinal !== "admin" && (!gradoFinal || !grupoFinal)) {
+      return res.status(400).json({ error: "Para usuarios profesor debes asignar grado y grupo" });
+    }
 
     const usuarioExistente = await Usuario.findOne({ username });
     if (usuarioExistente) {
@@ -239,7 +316,9 @@ app.post("/api/usuarios", autenticarToken, async (req, res) => {
       username,
       password: hashedPassword,
       nombre,
-      rol: rol || "profesor"
+      rol: rolFinal,
+      gradoAsignado: gradoFinal,
+      grupoAsignado: grupoFinal
     });
 
     await nuevoUsuario.save();
@@ -249,16 +328,49 @@ app.post("/api/usuarios", autenticarToken, async (req, res) => {
   }
 });
 
+app.get("/api/usuarios", autenticarToken, async (req, res) => {
+  try {
+    if (req.user.rol !== "admin") {
+      return res.status(403).json({ error: "Solo administradores pueden ver usuarios" });
+    }
+
+    const usuarios = await Usuario.find({})
+      .select("username nombre rol gradoAsignado grupoAsignado fechaCreacion")
+      .sort({ nombre: 1 });
+
+    return res.json(usuarios);
+  } catch (error) {
+    return res.status(500).json({ error: "Error al obtener usuarios" });
+  }
+});
+
 // ============ ENDPOINTS DE ESTUDIANTES ============
 
 // Obtener todos los estudiantes (con filtros opcionales)
 app.get("/api/estudiantes", autenticarToken, async (req, res) => {
   try {
     const { grado, grupo, busqueda } = req.query;
-    let filtro = {};
+    const scopeFilter = getScopeFilterOrReject(req, res);
+    if (scopeFilter === null) return;
 
-    if (grado) filtro.grado = grado;
-    if (grupo) filtro.grupo = grupo;
+    let filtro = { ...scopeFilter };
+    const gradoNormalizado = normalizeGrade(grado);
+    const grupoNormalizado = normalizeGroup(grupo);
+
+    if (gradoNormalizado) {
+      if (scopeFilter.grado && scopeFilter.grado !== gradoNormalizado) {
+        return res.json([]);
+      }
+      filtro.grado = gradoNormalizado;
+    }
+
+    if (grupoNormalizado) {
+      if (scopeFilter.grupo && scopeFilter.grupo !== grupoNormalizado) {
+        return res.json([]);
+      }
+      filtro.grupo = grupoNormalizado;
+    }
+
     if (busqueda) {
       filtro.$or = [
         { nombre: { $regex: busqueda, $options: "i" } },
@@ -348,6 +460,9 @@ app.get("/api/estudiantes/:id", autenticarToken, async (req, res) => {
     if (!estudiante) {
       return res.status(404).json({ error: "Estudiante no encontrado" });
     }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
+    }
     res.json(estudiante);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener estudiante" });
@@ -357,7 +472,27 @@ app.get("/api/estudiantes/:id", autenticarToken, async (req, res) => {
 // Crear estudiante
 app.post("/api/estudiantes", autenticarToken, async (req, res) => {
   try {
-    const estudianteData = req.body;
+    const estudianteData = { ...req.body };
+    const scope = getUserScope(req.user);
+
+    if (scope) {
+      if (!scope.grado || !scope.grupo) {
+        return res.status(403).json({ error: "Tu usuario no tiene grado/grupo asignado. Contacta al administrador." });
+      }
+
+      const gradoPayload = normalizeGrade(estudianteData.grado);
+      const grupoPayload = normalizeGroup(estudianteData.grupo);
+      if ((gradoPayload && gradoPayload !== scope.grado) || (grupoPayload && grupoPayload !== scope.grupo)) {
+        return res.status(403).json({ error: "Solo puedes crear estudiantes de tu grado y grupo asignado" });
+      }
+
+      estudianteData.grado = scope.grado;
+      estudianteData.grupo = scope.grupo;
+    } else {
+      estudianteData.grado = normalizeGrade(estudianteData.grado);
+      estudianteData.grupo = normalizeGroup(estudianteData.grupo);
+    }
+
     const nuevoEstudiante = new Estudiante(estudianteData);
     await nuevoEstudiante.save();
     res.status(201).json({ message: "Estudiante creado exitosamente", estudiante: nuevoEstudiante });
@@ -372,18 +507,43 @@ app.post("/api/estudiantes", autenticarToken, async (req, res) => {
 // Actualizar estudiante
 app.put("/api/estudiantes/:id", autenticarToken, async (req, res) => {
   try {
-    const estudianteActualizado = await Estudiante.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
-    
-    if (!estudianteActualizado) {
+    const estudiante = await Estudiante.findById(req.params.id);
+    if (!estudiante) {
       return res.status(404).json({ error: "Estudiante no encontrado" });
     }
-    
-    res.json({ message: "Estudiante actualizado", estudiante: estudianteActualizado });
+
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso para actualizar este estudiante" });
+    }
+
+    const payload = { ...req.body };
+    const scope = getUserScope(req.user);
+    if (scope) {
+      if (!scope.grado || !scope.grupo) {
+        return res.status(403).json({ error: "Tu usuario no tiene grado/grupo asignado. Contacta al administrador." });
+      }
+
+      const gradoFinal = normalizeGrade(payload.grado || estudiante.grado);
+      const grupoFinal = normalizeGroup(payload.grupo || estudiante.grupo);
+      if (gradoFinal !== scope.grado || grupoFinal !== scope.grupo) {
+        return res.status(403).json({ error: "Solo puedes gestionar estudiantes de tu grado y grupo asignado" });
+      }
+
+      payload.grado = scope.grado;
+      payload.grupo = scope.grupo;
+    } else {
+      if (payload.grado != null) payload.grado = normalizeGrade(payload.grado);
+      if (payload.grupo != null) payload.grupo = normalizeGroup(payload.grupo);
+    }
+
+    Object.assign(estudiante, payload);
+    await estudiante.save();
+
+    res.json({ message: "Estudiante actualizado", estudiante });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ error: "Ya existe un estudiante con esa identificacion" });
+    }
     res.status(500).json({ error: "Error al actualizar estudiante" });
   }
 });
@@ -420,6 +580,9 @@ app.post("/api/asistencia", autenticarToken, async (req, res) => {
     if (!estudiante) {
       return res.status(404).json({ error: "Estudiante no encontrado" });
     }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
+    }
 
     estudiante.historial.push({
       fecha,
@@ -445,7 +608,7 @@ app.post("/api/convivencia/reportes", autenticarToken, async (req, res) => {
       estudianteId,
       fecha,
       categoria = "convivencia",
-      gravedad = "media",
+      gravedad = "tipo2",
       estado = "abierto",
       descripcion,
       acciones = ""
@@ -459,6 +622,9 @@ app.post("/api/convivencia/reportes", autenticarToken, async (req, res) => {
     if (!estudiante) {
       return res.status(404).json({ error: "Estudiante no encontrado" });
     }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
+    }
 
     const fechaReporte = fecha ? new Date(fecha) : new Date();
     if (Number.isNaN(fechaReporte.getTime())) {
@@ -468,7 +634,7 @@ app.post("/api/convivencia/reportes", autenticarToken, async (req, res) => {
     const nuevoReporte = {
       fecha: fechaReporte,
       categoria,
-      gravedad,
+      gravedad: normalizeSeverity(gravedad),
       estado,
       descripcion,
       acciones,
@@ -495,6 +661,9 @@ app.get("/api/convivencia/reportes/:estudianteId", autenticarToken, async (req, 
     if (!estudiante) {
       return res.status(404).json({ error: "Estudiante no encontrado" });
     }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
+    }
 
     const reportesConvivencia = [...(estudiante.reportesConvivencia || [])]
       .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
@@ -511,6 +680,87 @@ app.get("/api/convivencia/reportes/:estudianteId", autenticarToken, async (req, 
     });
   } catch (error) {
     return res.status(500).json({ error: "Error al obtener reportes de convivencia" });
+  }
+});
+
+app.put("/api/convivencia/reportes/:estudianteId/:reporteId", autenticarToken, async (req, res) => {
+  try {
+    const { estudianteId, reporteId } = req.params;
+    const estudiante = await Estudiante.findById(estudianteId);
+    if (!estudiante) {
+      return res.status(404).json({ error: "Estudiante no encontrado" });
+    }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
+    }
+
+    const reporte = estudiante.reportesConvivencia.id(reporteId);
+    if (!reporte) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    const {
+      fecha,
+      categoria,
+      gravedad,
+      estado,
+      descripcion,
+      acciones
+    } = req.body;
+
+    if (typeof descripcion === "string" && !descripcion.trim()) {
+      return res.status(400).json({ error: "La descripcion del reporte es obligatoria" });
+    }
+    if (descripcion == null && !reporte.descripcion) {
+      return res.status(400).json({ error: "La descripcion del reporte es obligatoria" });
+    }
+
+    if (typeof fecha === "string" && fecha.trim()) {
+      const fechaReporte = new Date(fecha);
+      if (Number.isNaN(fechaReporte.getTime())) {
+        return res.status(400).json({ error: "Fecha de reporte invalida" });
+      }
+      reporte.fecha = fechaReporte;
+    }
+
+    if (typeof categoria === "string" && categoria.trim()) reporte.categoria = categoria;
+    if (typeof gravedad === "string" && gravedad.trim()) reporte.gravedad = normalizeSeverity(gravedad);
+    if (typeof estado === "string" && estado.trim()) reporte.estado = estado;
+    if (typeof descripcion === "string") reporte.descripcion = descripcion.trim();
+    if (typeof acciones === "string") reporte.acciones = acciones.trim();
+
+    await estudiante.save();
+    return res.json({
+      message: "Reporte de convivencia actualizado",
+      reporte
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Error al actualizar reporte de convivencia" });
+  }
+});
+
+app.delete("/api/convivencia/reportes/:estudianteId/:reporteId", autenticarToken, async (req, res) => {
+  try {
+    const { estudianteId, reporteId } = req.params;
+    const estudiante = await Estudiante.findById(estudianteId);
+    if (!estudiante) {
+      return res.status(404).json({ error: "Estudiante no encontrado" });
+    }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
+    }
+
+    const indexReporte = estudiante.reportesConvivencia.findIndex((item) => String(item._id) === String(reporteId));
+    if (indexReporte === -1) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    estudiante.reportesConvivencia.splice(indexReporte, 1);
+    await estudiante.save();
+
+    return res.json({ message: "Reporte de convivencia eliminado" });
+  } catch (error) {
+    return res.status(500).json({ error: "Error al eliminar reporte de convivencia" });
   }
 });
 
@@ -565,7 +815,7 @@ function construirReporteConvivencia(historial, resumenAsistencia, reportesConvi
     tipo: r.categoria || "convivencia",
     observacion: r.descripcion,
     registradoPor: r.registradoPor || "",
-    gravedad: r.gravedad || "media",
+    gravedad: normalizeSeverity(r.gravedad),
     estado: r.estado || "abierto",
     fuente: "reporte"
   }));
@@ -578,7 +828,7 @@ function construirReporteConvivencia(historial, resumenAsistencia, reportesConvi
     const fecha = new Date(r.fecha);
     return !Number.isNaN(fecha.getTime()) &&
       fecha >= new Date(Date.now() - (30 * 24 * 60 * 60 * 1000)) &&
-      r.gravedad === "alta";
+      normalizeSeverity(r.gravedad) === "tipo3";
   }).length;
 
   const reportesConvivencia30 = reportesConvivencia.filter((r) => {
@@ -608,7 +858,7 @@ function construirReporteConvivencia(historial, resumenAsistencia, reportesConvi
   const alertas = [];
   if (faltas30 >= 3) alertas.push("Acumula 3 o mas faltas en los ultimos 30 dias.");
   if (retardos30 >= 5) alertas.push("Acumula 5 o mas retardos en los ultimos 30 dias.");
-  if (salidas30 >= 3) alertas.push("Acumula 3 o mas salidas anticipadas en los ultimos 30 dias.");
+  if (salidas30 >= 3) alertas.push("Acumula 3 o mas permisos en los ultimos 30 dias.");
   if (reportesConvivencia30 > 0) alertas.push(`Tiene ${reportesConvivencia30} reporte(s) de convivencia en los ultimos 30 dias.`);
   if (reportesAbiertos > 0) alertas.push(`Tiene ${reportesAbiertos} reporte(s) de convivencia abiertos/en seguimiento.`);
   if (alertas.length === 0) alertas.push("Sin alertas relevantes de convivencia.");
@@ -628,6 +878,9 @@ app.get("/api/perfil/:id", autenticarToken, async (req, res) => {
     const estudiante = await Estudiante.findById(req.params.id);
     if (!estudiante) {
       return res.status(404).json({ error: "Estudiante no encontrado" });
+    }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "No tienes acceso a este estudiante" });
     }
 
     const historialAnual = [...estudiante.historial].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
@@ -667,21 +920,25 @@ app.get("/api/perfil/:id", autenticarToken, async (req, res) => {
 app.get("/api/reportes/general", autenticarToken, async (req, res) => {
   try {
     const { fechaInicio, fechaFin, grado, grupo } = req.query;
-    
-    let filtro = {};
-    let filtroFecha = {};
+    const scopeFilter = getScopeFilterOrReject(req, res);
+    if (scopeFilter === null) return;
 
-    if (fechaInicio && fechaFin) {
-      filtroFecha = {
-        fecha: {
-          $gte: new Date(fechaInicio),
-          $lte: new Date(fechaFin)
-        }
-      };
+    let filtro = { ...scopeFilter };
+    const gradoNormalizado = normalizeGrade(grado);
+    const grupoNormalizado = normalizeGroup(grupo);
+
+    if (gradoNormalizado) {
+      if (scopeFilter.grado && scopeFilter.grado !== gradoNormalizado) {
+        return res.json([]);
+      }
+      filtro.grado = gradoNormalizado;
     }
-
-    if (grado) filtro.grado = grado;
-    if (grupo) filtro.grupo = grupo;
+    if (grupoNormalizado) {
+      if (scopeFilter.grupo && scopeFilter.grupo !== grupoNormalizado) {
+        return res.json([]);
+      }
+      filtro.grupo = grupoNormalizado;
+    }
 
     const estudiantes = await Estudiante.find(filtro);
     
@@ -722,8 +979,10 @@ app.get("/api/reportes/general", autenticarToken, async (req, res) => {
 app.get("/api/reportes/por-grupo", autenticarToken, async (req, res) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
-    
-    const estudiantes = await Estudiante.find({});
+    const scopeFilter = getScopeFilterOrReject(req, res);
+    if (scopeFilter === null) return;
+
+    const estudiantes = await Estudiante.find(scopeFilter);
     
     const grupos = {};
     
@@ -766,8 +1025,10 @@ app.get("/api/reportes/por-grupo", autenticarToken, async (req, res) => {
 app.get("/api/reportes/estadisticas", autenticarToken, async (req, res) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
-    
-    const estudiantes = await Estudiante.find({});
+    const scopeFilter = getScopeFilterOrReject(req, res);
+    if (scopeFilter === null) return;
+
+    const estudiantes = await Estudiante.find(scopeFilter);
     
     let totalFaltas = 0;
     let totalRetardos = 0;

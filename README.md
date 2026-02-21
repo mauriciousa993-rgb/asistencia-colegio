@@ -158,7 +158,7 @@ API_URL=https://tu-backend.onrender.com/api
 ### Registro de Asistencia
 - ✅ Registro individual
 - ✅ Registro masivo por grado/grupo
-- ✅ Tipos: Presente, Falta, Retardo, Salida
+- ✅ Tipos: Presente, Falta, Retardo, Permiso
 - ✅ Adjuntar fotos (base64)
 - ✅ Observaciones
 

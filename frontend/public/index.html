@@ -280,6 +280,9 @@
           <button data-view="reportes" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900">
             <i class="fas fa-chart-bar mr-2"></i>Reportes
           </button>
+          <button data-view="usuarios" id="tab-usuarios" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900 hidden">
+            <i class="fas fa-user-cog mr-2"></i>Usuarios
+          </button>
         </div>
       </div>
     </div>
@@ -313,7 +316,7 @@
                     <option value="presente">Presente</option>
                     <option value="falta">Falta</option>
                     <option value="retardo">Retardo</option>
-                    <option value="salida">Salida</option>
+                    <option value="salida">Permiso</option>
                   </select>
                 </div>
                 <div>
@@ -391,7 +394,7 @@
                   <option value="presente">Presente</option>
                   <option value="falta">Falta</option>
                   <option value="retardo">Retardo</option>
-                  <option value="salida">Salida</option>
+                  <option value="salida">Permiso</option>
                 </select>
                 <input id="salon-fecha" type="date" class="border border-slate-300 rounded-lg px-4 py-2">
                 <input id="salon-hora" type="time" class="border border-slate-300 rounded-lg px-4 py-2">
@@ -654,9 +657,9 @@
                   <div>
                     <label class="block text-sm font-medium mb-1">Gravedad</label>
                     <select id="conv-rep-gravedad" class="w-full border border-slate-300 rounded-lg px-4 py-2">
-                      <option value="baja">Baja</option>
-                      <option value="media" selected>Media</option>
-                      <option value="alta">Alta</option>
+                      <option value="tipo1">Tipo 1</option>
+                      <option value="tipo2" selected>Tipo 2</option>
+                      <option value="tipo3">Tipo 3</option>
                     </select>
                   </div>
                   <div>
@@ -682,9 +685,14 @@
                 </div>
                 <div class="flex items-center justify-between gap-4">
                   <p id="conv-reporte-estado" class="text-sm"></p>
-                  <button type="submit" id="btn-guardar-conv-reporte" class="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700">
-                    Guardar Reporte
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <button type="button" id="btn-cancelar-edicion-conv-reporte" class="hidden bg-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-400">
+                      Cancelar edicion
+                    </button>
+                    <button type="submit" id="btn-guardar-conv-reporte" class="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700">
+                      Guardar Reporte
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
@@ -700,6 +708,7 @@
                       <th class="px-4 py-2 text-left">Estado</th>
                       <th class="px-4 py-2 text-left">Descripcion</th>
                       <th class="px-4 py-2 text-left">Registrado por</th>
+                      <th class="px-4 py-2 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody id="conv-historial-reportes"></tbody>
@@ -731,7 +740,7 @@
               </div>
               <div class="border rounded-lg p-4 text-center">
                 <div class="text-3xl font-bold text-purple-600" id="stat-salidas">0</div>
-                <div class="text-sm text-slate-600">Total Salidas</div>
+                <div class="text-sm text-slate-600">Total Permisos</div>
               </div>
             </div>
             <div class="flex gap-4">
@@ -755,7 +764,7 @@
                     <th class="px-4 py-2 text-center">Estudiantes</th>
                     <th class="px-4 py-2 text-center text-red-600">Faltas</th>
                     <th class="px-4 py-2 text-center text-yellow-600">Retardos</th>
-                    <th class="px-4 py-2 text-center text-purple-600">Salidas</th>
+                    <th class="px-4 py-2 text-center text-purple-600">Permisos</th>
                   </tr>
                 </thead>
                 <tbody id="reporte-grupo"></tbody>
@@ -792,11 +801,97 @@
                     <th class="px-4 py-2 text-left">Grupo</th>
                     <th class="px-4 py-2 text-center text-red-600">Faltas</th>
                     <th class="px-4 py-2 text-center text-yellow-600">Retardos</th>
-                    <th class="px-4 py-2 text-center text-purple-600">Salidas</th>
+                    <th class="px-4 py-2 text-center text-purple-600">Permisos</th>
                     <th class="px-4 py-2 text-center font-bold">Total</th>
                   </tr>
                 </thead>
                 <tbody id="reporte-general"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Usuarios View -->
+      <div id="view-usuarios" class="view hidden">
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Crear Usuario</h2>
+            <form id="form-usuario" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium mb-1">Nombre *</label>
+                <input id="usuario-nombre" type="text" required class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Usuario *</label>
+                <input id="usuario-username" type="text" required class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Contrasena *</label>
+                <input id="usuario-password" type="password" required class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Rol *</label>
+                <select id="usuario-rol" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                  <option value="profesor">Director de grupo</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </div>
+
+              <div id="usuario-asignacion-grupo" class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium mb-1">Grado asignado *</label>
+                  <select id="usuario-grado" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                    <option value="">Seleccionar</option>
+                    <option value="6">6&deg;</option>
+                    <option value="7">7&deg;</option>
+                    <option value="8">8&deg;</option>
+                    <option value="9">9&deg;</option>
+                    <option value="10">10&deg;</option>
+                    <option value="11">11&deg;</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">Grupo asignado *</label>
+                  <select id="usuario-grupo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                    <option value="">Seleccionar</option>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                    <option value="D">D</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between gap-3">
+                <p id="usuario-estado" class="text-sm"></p>
+                <button id="btn-crear-usuario" type="submit" class="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700">
+                  Crear Usuario
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div class="bg-white rounded-xl shadow p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-xl font-semibold">Usuarios Registrados</h2>
+              <button id="btn-recargar-usuarios" class="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800">
+                Actualizar
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left">Nombre</th>
+                    <th class="px-4 py-2 text-left">Usuario</th>
+                    <th class="px-4 py-2 text-left">Rol</th>
+                    <th class="px-4 py-2 text-left">Grado</th>
+                    <th class="px-4 py-2 text-left">Grupo</th>
+                    <th class="px-4 py-2 text-left">Creado</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla-usuarios"></tbody>
               </table>
             </div>
           </div>

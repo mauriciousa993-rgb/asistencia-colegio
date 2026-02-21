@@ -12,6 +12,9 @@ let salonActual = { grado: "", grupo: "" };
 let estudiantesConvivencia = [];
 let estudiantesPerfil = [];
 let convivenciaEstudianteActualId = "";
+let convivenciaReporteEditandoId = "";
+let reportesConvivenciaActuales = [];
+let usuariosSistema = [];
 
 function normalizarTexto(value) {
   return String(value ?? "").replace(/\u00C2/g, "").trim();
@@ -30,6 +33,38 @@ function normalizarGrupo(value) {
 function formatearGrado(value) {
   const grado = normalizarGrado(value);
   return grado ? `${grado}\u00B0` : "-";
+}
+
+function formatearTipoAsistencia(tipo) {
+  const value = String(tipo || "").toLowerCase();
+  if (value === "salida") return "Permiso";
+  if (value === "presente") return "Presente";
+  if (value === "falta") return "Falta";
+  if (value === "retardo") return "Retardo";
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : "-";
+}
+
+function normalizarGravedadConvivencia(gravedad) {
+  const value = String(gravedad || "").toLowerCase();
+  if (value === "tipo1" || value === "baja") return "tipo1";
+  if (value === "tipo2" || value === "media") return "tipo2";
+  if (value === "tipo3" || value === "alta") return "tipo3";
+  return "tipo2";
+}
+
+function formatearGravedadConvivencia(gravedad) {
+  const value = normalizarGravedadConvivencia(gravedad);
+  if (value === "tipo1") return "Tipo 1";
+  if (value === "tipo2") return "Tipo 2";
+  if (value === "tipo3") return "Tipo 3";
+  return "Tipo 2";
+}
+
+function obtenerClaseGravedadConvivencia(gravedad) {
+  const value = normalizarGravedadConvivencia(gravedad);
+  if (value === "tipo3") return "text-red-700";
+  if (value === "tipo2") return "text-yellow-700";
+  return "text-green-700";
 }
 
 function normalizarEstudianteBasico(estudiante) {
@@ -87,6 +122,9 @@ function inicializarEventos() {
   
   // Reportes
   setupReportes();
+
+  // Usuarios
+  setupUsuarios();
 }
 
 // ==================== AUTENTICACION ====================
@@ -98,7 +136,20 @@ function mostrarLogin() {
 function mostrarApp() {
   document.getElementById("login-page").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
-  document.getElementById("user-name").textContent = usuarioActual.nombre;
+  const alcance = usuarioActual?.rol !== "admin" && usuarioActual?.gradoAsignado && usuarioActual?.grupoAsignado
+    ? ` - ${formatearGrado(usuarioActual.gradoAsignado)} ${normalizarGrupo(usuarioActual.grupoAsignado)}`
+    : "";
+  document.getElementById("user-name").textContent = `${usuarioActual.nombre} (${usuarioActual.rol})${alcance}`;
+
+  const tabUsuarios = document.getElementById("tab-usuarios");
+  if (tabUsuarios) {
+    if (usuarioActual?.rol === "admin") {
+      tabUsuarios.classList.remove("hidden");
+    } else {
+      tabUsuarios.classList.add("hidden");
+    }
+  }
+
   const btnImportarCsv = document.getElementById("btn-importar-csv");
   if (btnImportarCsv) {
     if (usuarioActual?.rol === "admin") {
@@ -189,6 +240,8 @@ function cambiarVista(vista) {
   } else if (vista === "reportes") {
     cargarEstadisticas();
     cargarReporteGrupo();
+  } else if (vista === "usuarios") {
+    cargarUsuarios();
   }
 }
 
@@ -480,7 +533,7 @@ function renderTablaSalon(lista) {
           <option value="presente">Presente</option>
           <option value="falta">Falta</option>
           <option value="retardo">Retardo</option>
-          <option value="salida">Salida</option>
+          <option value="salida">Permiso</option>
         </select>
       </td>
       <td class="px-4 py-2">
@@ -1040,6 +1093,7 @@ function setupConvivencia() {
   const selectEstudiante = document.getElementById("conv-estudiante");
   const formReporte = document.getElementById("form-conv-reporte");
   const inputFechaReporte = document.getElementById("conv-rep-fecha");
+  const btnCancelarEdicion = document.getElementById("btn-cancelar-edicion-conv-reporte");
 
   if (!btnCargar || !btnVer || !inputBusqueda || !selectEstudiante) return;
 
@@ -1051,6 +1105,12 @@ function setupConvivencia() {
   btnVer.addEventListener("click", cargarReporteConvivenciaSeleccionado);
   if (formReporte) {
     formReporte.addEventListener("submit", guardarReporteConvivencia);
+  }
+  if (btnCancelarEdicion) {
+    btnCancelarEdicion.addEventListener("click", () => {
+      prepararFormularioReporteConvivencia();
+      mostrarEstadoReporteConvivencia("Edicion cancelada.", "yellow");
+    });
   }
 
   inputBusqueda.addEventListener("input", () => {
@@ -1118,6 +1178,8 @@ async function cargarEstudiantesConvivencia() {
   try {
     estudiantesConvivencia = filtrarEstudiantesPorGradoGrupo(estudiantes, grado, grupo);
     convivenciaEstudianteActualId = "";
+    convivenciaReporteEditandoId = "";
+    reportesConvivenciaActuales = [];
     inputBusqueda.value = "";
     renderOpcionesConvivencia(estudiantesConvivencia);
     document.getElementById("conv-content").classList.add("hidden");
@@ -1161,6 +1223,7 @@ async function cargarReporteConvivenciaSeleccionado() {
 
     const est = data.estudiante || {};
     convivenciaEstudianteActualId = id;
+    reportesConvivenciaActuales = data.reportesConvivencia || [];
     document.getElementById("conv-estudiante-info").innerHTML = `
       <p><strong>Nombre:</strong> ${est.nombre || "-"}</p>
       <p><strong>Grado/Grupo:</strong> ${formatearGrado(est.grado)} ${normalizarGrupo(est.grupo || "-")}</p>
@@ -1187,16 +1250,54 @@ function mostrarEstadoConvivencia(mensaje, color) {
 function prepararFormularioReporteConvivencia() {
   const form = document.getElementById("form-conv-reporte");
   if (!form) return;
+  convivenciaReporteEditandoId = "";
   form.reset();
   const inputFecha = document.getElementById("conv-rep-fecha");
   if (inputFecha) inputFecha.value = obtenerFechaHoy();
   const selectGravedad = document.getElementById("conv-rep-gravedad");
-  if (selectGravedad) selectGravedad.value = "media";
+  if (selectGravedad) selectGravedad.value = "tipo2";
   const selectEstado = document.getElementById("conv-rep-estado");
   if (selectEstado) selectEstado.value = "abierto";
   const selectCategoria = document.getElementById("conv-rep-categoria");
   if (selectCategoria) selectCategoria.value = "convivencia";
+  actualizarUIEdicionReporteConvivencia();
   limpiarEstadoReporteConvivencia();
+}
+
+function actualizarUIEdicionReporteConvivencia() {
+  const btnGuardar = document.getElementById("btn-guardar-conv-reporte");
+  const btnCancelarEdicion = document.getElementById("btn-cancelar-edicion-conv-reporte");
+  if (!btnGuardar || !btnCancelarEdicion) return;
+
+  if (convivenciaReporteEditandoId) {
+    btnGuardar.textContent = "Actualizar Reporte";
+    btnCancelarEdicion.classList.remove("hidden");
+  } else {
+    btnGuardar.textContent = "Guardar Reporte";
+    btnCancelarEdicion.classList.add("hidden");
+  }
+}
+
+function formatearFechaParaInput(fecha) {
+  if (!fecha) return "";
+  const date = new Date(fecha);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function cargarReporteEnFormularioConvivencia(reporte) {
+  if (!reporte) return;
+  convivenciaReporteEditandoId = String(reporte._id || "");
+  document.getElementById("conv-rep-fecha").value = formatearFechaParaInput(reporte.fecha) || obtenerFechaHoy();
+  document.getElementById("conv-rep-categoria").value = reporte.categoria || "convivencia";
+  document.getElementById("conv-rep-gravedad").value = normalizarGravedadConvivencia(reporte.gravedad);
+  document.getElementById("conv-rep-estado").value = reporte.estado || "abierto";
+  document.getElementById("conv-rep-descripcion").value = reporte.descripcion || "";
+  document.getElementById("conv-rep-acciones").value = reporte.acciones || "";
+  actualizarUIEdicionReporteConvivencia();
 }
 
 function mostrarEstadoReporteConvivencia(mensaje, color) {
@@ -1219,29 +1320,77 @@ function renderHistorialReportesConvivencia(reportes) {
   tbody.innerHTML = "";
 
   if (!reportes.length) {
-    tbody.innerHTML = "<tr><td colspan='6' class='px-4 py-4 text-center text-slate-500'>No hay reportes registrados.</td></tr>";
+    tbody.innerHTML = "<tr><td colspan='7' class='px-4 py-4 text-center text-slate-500'>No hay reportes registrados.</td></tr>";
     return;
   }
 
   reportes.forEach((r) => {
     const tr = document.createElement("tr");
     tr.className = "border-b";
-    const gravedadClass =
-      r.gravedad === "alta"
-        ? "text-red-700"
-        : r.gravedad === "media"
-          ? "text-yellow-700"
-          : "text-green-700";
+    const reporteId = String(r._id || "");
+    const gravedadClass = obtenerClaseGravedadConvivencia(r.gravedad);
     tr.innerHTML = `
       <td class="px-4 py-2">${r.fecha ? new Date(r.fecha).toLocaleDateString() : "-"}</td>
       <td class="px-4 py-2">${r.categoria || "-"}</td>
-      <td class="px-4 py-2 font-medium ${gravedadClass}">${r.gravedad || "-"}</td>
+      <td class="px-4 py-2 font-medium ${gravedadClass}">${formatearGravedadConvivencia(r.gravedad)}</td>
       <td class="px-4 py-2">${r.estado || "-"}</td>
       <td class="px-4 py-2">${r.descripcion || "-"}</td>
       <td class="px-4 py-2 text-slate-500">${r.registradoPor || "-"}</td>
+      <td class="px-4 py-2 text-center whitespace-nowrap">
+        <button onclick="editarReporteConvivencia('${reporteId}')" class="text-yellow-600 hover:text-yellow-800 mr-2" title="Editar reporte" ${reporteId ? "" : "disabled"}>
+          <i class="fas fa-edit"></i>
+        </button>
+        <button onclick="eliminarReporteConvivencia('${reporteId}')" class="text-red-600 hover:text-red-800" title="Eliminar reporte" ${reporteId ? "" : "disabled"}>
+          <i class="fas fa-trash"></i>
+        </button>
+      </td>
     `;
     tbody.appendChild(tr);
   });
+}
+
+function editarReporteConvivencia(reporteId) {
+  const reporte = reportesConvivenciaActuales.find((r) => String(r._id) === String(reporteId));
+  if (!reporte) {
+    mostrarEstadoReporteConvivencia("No se encontro el reporte seleccionado.", "red");
+    return;
+  }
+
+  cargarReporteEnFormularioConvivencia(reporte);
+  mostrarEstadoReporteConvivencia("Editando reporte seleccionado.", "yellow");
+}
+
+async function eliminarReporteConvivencia(reporteId) {
+  if (!convivenciaEstudianteActualId) {
+    mostrarEstadoReporteConvivencia("Selecciona un estudiante antes de eliminar reportes.", "red");
+    return;
+  }
+  if (!reporteId) {
+    mostrarEstadoReporteConvivencia("No se pudo identificar el reporte a eliminar.", "red");
+    return;
+  }
+  if (!confirm("Estas seguro de eliminar este reporte? Esta accion no se puede deshacer.")) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/convivencia/reportes/${convivenciaEstudianteActualId}/${reporteId}`, {
+      method: "DELETE",
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo eliminar el reporte.");
+    }
+
+    if (convivenciaReporteEditandoId === reporteId) {
+      prepararFormularioReporteConvivencia();
+    }
+    mostrarEstadoReporteConvivencia("Reporte eliminado correctamente.", "green");
+    await cargarReporteConvivenciaSeleccionado();
+  } catch (error) {
+    mostrarEstadoReporteConvivencia(error.message, "red");
+  }
 }
 
 async function guardarReporteConvivencia(event) {
@@ -1269,27 +1418,33 @@ async function guardarReporteConvivencia(event) {
   }
 
   const btnGuardar = document.getElementById("btn-guardar-conv-reporte");
+  const esEdicion = Boolean(convivenciaReporteEditandoId);
   try {
     btnGuardar.disabled = true;
-    btnGuardar.textContent = "Guardando...";
+    btnGuardar.textContent = esEdicion ? "Guardando cambios..." : "Guardando...";
 
-    const response = await fetch(`${API_URL}/convivencia/reportes`, {
-      method: "POST",
+    const endpoint = esEdicion
+      ? `${API_URL}/convivencia/reportes/${estudianteId}/${convivenciaReporteEditandoId}`
+      : `${API_URL}/convivencia/reportes`;
+    const method = esEdicion ? "PUT" : "POST";
+
+    const response = await fetch(endpoint, {
+      method,
       headers: getHeaders(),
       body: JSON.stringify(payload)
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || "No se pudo guardar el reporte.");
+      throw new Error(data.error || (esEdicion ? "No se pudo actualizar el reporte." : "No se pudo guardar el reporte."));
     }
 
-    mostrarEstadoReporteConvivencia("Reporte guardado correctamente.", "green");
+    mostrarEstadoReporteConvivencia(esEdicion ? "Reporte actualizado correctamente." : "Reporte guardado correctamente.", "green");
     await cargarReporteConvivenciaSeleccionado();
   } catch (error) {
     mostrarEstadoReporteConvivencia(error.message, "red");
   } finally {
     btnGuardar.disabled = false;
-    btnGuardar.textContent = "Guardar Reporte";
+    actualizarUIEdicionReporteConvivencia();
   }
 }
 
@@ -1363,7 +1518,7 @@ async function buscarPerfil(id) {
                 : "text-purple-600";
         tr.innerHTML = `
           <td class="px-4 py-2">${new Date(h.fecha).toLocaleDateString()}</td>
-          <td class="px-4 py-2 font-medium ${tipoColor}">${h.tipo.charAt(0).toUpperCase() + h.tipo.slice(1)}</td>
+          <td class="px-4 py-2 font-medium ${tipoColor}">${formatearTipoAsistencia(h.tipo)}</td>
           <td class="px-4 py-2">${h.hora || "-"}</td>
           <td class="px-4 py-2">${h.observacion || "-"}</td>
           <td class="px-4 py-2 text-sm text-slate-500">${h.registradoPor || "-"}</td>
@@ -1399,7 +1554,7 @@ function renderResumenAsistenciaPerfil(resumen) {
     <p><strong>Presentes:</strong> ${resumen.presentes ?? 0}</p>
     <p><strong>Faltas:</strong> ${resumen.faltas ?? 0}</p>
     <p><strong>Retardos:</strong> ${resumen.retardos ?? 0}</p>
-    <p><strong>Salidas:</strong> ${resumen.salidas ?? 0}</p>
+    <p><strong>Permisos:</strong> ${resumen.salidas ?? 0}</p>
     <p><strong>Ultimo registro:</strong> ${ultimo}</p>
     <div class="mt-3 pt-3 border-t border-slate-200">
       <p class="font-medium">Ultimos 30 dias</p>
@@ -1407,7 +1562,7 @@ function renderResumenAsistenciaPerfil(resumen) {
       <p>Presentes: ${resumen.ultimos30dias?.presentes ?? 0}</p>
       <p>Faltas: ${resumen.ultimos30dias?.faltas ?? 0}</p>
       <p>Retardos: ${resumen.ultimos30dias?.retardos ?? 0}</p>
-      <p>Salidas: ${resumen.ultimos30dias?.salidas ?? 0}</p>
+      <p>Permisos: ${resumen.ultimos30dias?.salidas ?? 0}</p>
     </div>
   `;
 }
@@ -1438,7 +1593,7 @@ function renderReporteConvivenciaEnContenedor(reporte, contenedorId) {
     .slice(0, 10)
     .map((obs) => {
       const fecha = obs.fecha ? new Date(obs.fecha).toLocaleDateString() : "-";
-      return `<li>${fecha}: ${obs.observacion || "-"} (${obs.tipo || "-"})</li>`;
+      return `<li>${fecha}: ${obs.observacion || "-"} (${formatearTipoAsistencia(obs.tipo)})</li>`;
     })
     .join("");
 
@@ -1456,6 +1611,144 @@ function renderReporteConvivenciaEnContenedor(reporte, contenedorId) {
       <ul class="list-disc pl-5 text-sm">${observacionesHTML || "<li>Sin observaciones relevantes.</li>"}</ul>
     </div>
   `;
+}
+
+function setupUsuarios() {
+  const form = document.getElementById("form-usuario");
+  const selectRol = document.getElementById("usuario-rol");
+  const btnRecargar = document.getElementById("btn-recargar-usuarios");
+
+  if (!form || !selectRol || !btnRecargar) return;
+
+  form.addEventListener("submit", guardarUsuario);
+  selectRol.addEventListener("change", actualizarFormularioUsuarioSegunRol);
+  btnRecargar.addEventListener("click", cargarUsuarios);
+  actualizarFormularioUsuarioSegunRol();
+}
+
+function actualizarFormularioUsuarioSegunRol() {
+  const selectRol = document.getElementById("usuario-rol");
+  const bloqueAsignacion = document.getElementById("usuario-asignacion-grupo");
+  const inputGrado = document.getElementById("usuario-grado");
+  const inputGrupo = document.getElementById("usuario-grupo");
+  if (!selectRol || !bloqueAsignacion || !inputGrado || !inputGrupo) return;
+
+  const esAdmin = selectRol.value === "admin";
+  if (esAdmin) {
+    bloqueAsignacion.classList.add("hidden");
+    inputGrado.required = false;
+    inputGrupo.required = false;
+    inputGrado.value = "";
+    inputGrupo.value = "";
+  } else {
+    bloqueAsignacion.classList.remove("hidden");
+    inputGrado.required = true;
+    inputGrupo.required = true;
+  }
+}
+
+function mostrarEstadoUsuarios(mensaje, color) {
+  const estado = document.getElementById("usuario-estado");
+  if (!estado) return;
+  estado.textContent = mensaje;
+  estado.className = `text-sm text-${color}-600`;
+}
+
+async function guardarUsuario(event) {
+  event.preventDefault();
+  if (usuarioActual?.rol !== "admin") {
+    mostrarEstadoUsuarios("Solo administradores pueden crear usuarios.", "red");
+    return;
+  }
+
+  const rol = document.getElementById("usuario-rol").value;
+  const payload = {
+    nombre: document.getElementById("usuario-nombre").value.trim(),
+    username: document.getElementById("usuario-username").value.trim(),
+    password: document.getElementById("usuario-password").value,
+    rol,
+    gradoAsignado: document.getElementById("usuario-grado").value,
+    grupoAsignado: document.getElementById("usuario-grupo").value
+  };
+
+  if (!payload.nombre || !payload.username || !payload.password) {
+    mostrarEstadoUsuarios("Nombre, usuario y contrasena son obligatorios.", "red");
+    return;
+  }
+
+  if (rol !== "admin" && (!payload.gradoAsignado || !payload.grupoAsignado)) {
+    mostrarEstadoUsuarios("Debes asignar grado y grupo al director de grupo.", "red");
+    return;
+  }
+
+  const btnCrear = document.getElementById("btn-crear-usuario");
+  try {
+    btnCrear.disabled = true;
+    btnCrear.textContent = "Creando...";
+
+    const response = await fetch(`${API_URL}/usuarios`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo crear el usuario.");
+    }
+
+    document.getElementById("form-usuario").reset();
+    document.getElementById("usuario-rol").value = "profesor";
+    actualizarFormularioUsuarioSegunRol();
+    mostrarEstadoUsuarios("Usuario creado correctamente.", "green");
+    await cargarUsuarios();
+  } catch (error) {
+    mostrarEstadoUsuarios(error.message, "red");
+  } finally {
+    btnCrear.disabled = false;
+    btnCrear.textContent = "Crear Usuario";
+  }
+}
+
+function renderTablaUsuarios(usuarios) {
+  const tbody = document.getElementById("tabla-usuarios");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  if (!usuarios.length) {
+    tbody.innerHTML = "<tr><td colspan='6' class='px-4 py-4 text-center text-slate-500'>No hay usuarios registrados.</td></tr>";
+    return;
+  }
+
+  usuarios.forEach((usuario) => {
+    const tr = document.createElement("tr");
+    tr.className = "border-b";
+    tr.innerHTML = `
+      <td class="px-4 py-2">${usuario.nombre || "-"}</td>
+      <td class="px-4 py-2">${usuario.username || "-"}</td>
+      <td class="px-4 py-2">${usuario.rol || "-"}</td>
+      <td class="px-4 py-2">${usuario.gradoAsignado ? formatearGrado(usuario.gradoAsignado) : "-"}</td>
+      <td class="px-4 py-2">${usuario.grupoAsignado ? normalizarGrupo(usuario.grupoAsignado) : "-"}</td>
+      <td class="px-4 py-2">${usuario.fechaCreacion ? new Date(usuario.fechaCreacion).toLocaleDateString() : "-"}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function cargarUsuarios() {
+  if (usuarioActual?.rol !== "admin") return;
+
+  try {
+    const response = await fetch(`${API_URL}/usuarios`, { headers: getHeaders() });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudieron cargar los usuarios.");
+    }
+
+    usuariosSistema = Array.isArray(data) ? data : [];
+    renderTablaUsuarios(usuariosSistema);
+  } catch (error) {
+    mostrarEstadoUsuarios(error.message, "red");
+  }
 }
 
 // ==================== REPORTES ====================
@@ -1572,7 +1865,7 @@ function exportarReporte() {
     return;
   }
   
-  let csv = "Nombre,Grado,Grupo,Faltas,Retardos,Salidas,Total\n";
+  let csv = "Nombre,Grado,Grupo,Faltas,Retardos,Permisos,Total\n";
   
   rows.forEach(row => {
     const cols = row.querySelectorAll("td");
