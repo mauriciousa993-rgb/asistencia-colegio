@@ -18,13 +18,54 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "secreto_super_seguro_2024";
 
 // Configuración de CORS
+const normalizeOrigin = (origin) => String(origin || "").trim().replace(/\/+$/, "");
+
+const configuredOrigins = [
+  process.env.FRONTEND_URL,
+  ...(process.env.FRONTEND_URLS || "")
+    .split(",")
+    .map((value) => value.trim())
+];
+
+const allowedOrigins = new Set(
+  configuredOrigins
+    .filter(Boolean)
+    .map((value) => normalizeOrigin(value))
+);
+
+const allowVercelPreviews = process.env.ALLOW_VERCEL_PREVIEWS !== "false";
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+
+  const normalized = normalizeOrigin(origin);
+  if (allowedOrigins.has(normalized)) return true;
+
+  // Permite previews de Vercel para evitar bloqueos por dominio dinamico.
+  if (allowVercelPreviews && /\.vercel\.app$/i.test(normalized)) {
+    return true;
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    return true;
+  }
+
+  return false;
+};
+
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL || '*' 
-    : '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`Origen no permitido por CORS: ${origin}`));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+  optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
