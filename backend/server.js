@@ -406,6 +406,97 @@ app.get("/api/usuarios", autenticarToken, async (req, res) => {
   }
 });
 
+// Actualizar usuario (solo admin)
+app.put("/api/usuarios/:id", autenticarToken, async (req, res) => {
+  try {
+    if (req.user.rol !== "admin") {
+      return res.status(403).json({ error: "Solo administradores pueden actualizar usuarios" });
+    }
+
+    const { id } = req.params;
+    const {
+      username,
+      password,
+      nombre,
+      rol,
+      gradoAsignado,
+      grupoAsignado
+    } = req.body;
+
+    const usuario = await Usuario.findById(id);
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    // Validar campos obligatorios
+    if (!username || !nombre) {
+      return res.status(400).json({ error: "username y nombre son obligatorios" });
+    }
+
+    const rolFinal = rol === "admin" ? "admin" : "profesor";
+    const gradoFinal = rolFinal === "admin" ? "" : normalizeGrade(gradoAsignado);
+    const grupoFinal = rolFinal === "admin" ? "" : normalizeGroup(grupoAsignado);
+
+    if (rolFinal !== "admin" && (!gradoFinal || !grupoFinal)) {
+      return res.status(400).json({ error: "Para usuarios profesor debes asignar grado y grupo" });
+    }
+
+    // Verificar si el nuevo username ya existe (si cambió)
+    if (username !== usuario.username) {
+      const usuarioExistente = await Usuario.findOne({ username });
+      if (usuarioExistente) {
+        return res.status(400).json({ error: "El nombre de usuario ya existe" });
+      }
+    }
+
+    // Actualizar campos
+    usuario.username = username;
+    usuario.nombre = nombre;
+    usuario.rol = rolFinal;
+    usuario.gradoAsignado = gradoFinal;
+    usuario.grupoAsignado = grupoFinal;
+
+    // Solo actualizar password si se proporciona
+    if (password && password.trim()) {
+      const salt = await bcrypt.genSalt(10);
+      usuario.password = await bcrypt.hash(password, salt);
+    }
+
+    await usuario.save();
+    res.json({ message: "Usuario actualizado exitosamente" });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ error: "El nombre de usuario ya existe" });
+    }
+    res.status(500).json({ error: "Error al actualizar usuario" });
+  }
+});
+
+// Eliminar usuario (solo admin)
+app.delete("/api/usuarios/:id", autenticarToken, async (req, res) => {
+  try {
+    if (req.user.rol !== "admin") {
+      return res.status(403).json({ error: "Solo administradores pueden eliminar usuarios" });
+    }
+
+    const { id } = req.params;
+
+    // Prevenir auto-eliminación
+    if (String(id) === String(req.user.id)) {
+      return res.status(400).json({ error: "No puedes eliminar tu propio usuario" });
+    }
+
+    const usuario = await Usuario.findByIdAndDelete(id);
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    res.json({ message: "Usuario eliminado exitosamente" });
+  } catch (error) {
+    res.status(500).json({ error: "Error al eliminar usuario" });
+  }
+});
+
 // ============ ENDPOINTS DE ESTUDIANTES ============
 
 // Obtener todos los estudiantes (con filtros opcionales)
