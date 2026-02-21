@@ -1,6 +1,65 @@
 const REQUIRED_HEADERS = ["identificacion", "nombre", "grado", "grupo"];
+const HEADER_ALIASES = {
+  identificacion: ["identificacion", "id", "codigo", "cod", "documento"],
+  nombre: ["nombre", "estudiante", "alumno"],
+  grado: ["grado", "curso"],
+  grupo: ["grupo", "salon", "seccion"],
+  fechaNacimiento: ["fechanacimiento", "fecha_nacimiento", "nacimiento"],
+  direccion: ["direccion"],
+  telefono: ["telefono", "celular"],
+  email: ["email", "correo", "correoelectronico"],
+  padre_nombre: ["padre_nombre", "padrenombre", "nombrepadre"],
+  padre_telefono: ["padre_telefono", "padretelefono", "telefonopadre"],
+  padre_email: ["padre_email", "padreemail", "correopadre"],
+  padre_ocupacion: ["padre_ocupacion", "padreocupacion", "ocupacionpadre"],
+  madre_nombre: ["madre_nombre", "madrenombre", "nombremadre"],
+  madre_telefono: ["madre_telefono", "madretelefono", "telefonomadre"],
+  madre_email: ["madre_email", "madreemail", "correomadre"],
+  madre_ocupacion: ["madre_ocupacion", "madreocupacion", "ocupacionmadre"],
+  tutor_nombre: ["tutor_nombre", "tutornombre", "nombretutor"],
+  tutor_telefono: ["tutor_telefono", "tutortelefono", "telefonotutor"],
+  tutor_email: ["tutor_email", "tutoremail", "correotutor"],
+  tutor_parentesco: ["tutor_parentesco", "tutorparentesco", "parentescotutor"]
+};
 
-function parseCsvLine(line) {
+const ALIAS_LOOKUP = Object.entries(HEADER_ALIASES).reduce((acc, [target, aliases]) => {
+  aliases.forEach((alias) => {
+    acc[normalizeHeaderToken(alias)] = target;
+  });
+  return acc;
+}, {});
+
+function normalizeHeaderToken(value) {
+  return String(value || "")
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function resolveHeader(rawHeader, state) {
+  const trimmed = String(rawHeader || "").replace(/^\uFEFF/, "").trim();
+  const token = normalizeHeaderToken(trimmed);
+
+  // Compatibilidad con archivos de Excel donde vienen dos columnas "G":
+  // primera G = grado, segunda G = grupo.
+  if (token === "g") {
+    if (!state.gAssignedToGrade) {
+      state.gAssignedToGrade = true;
+      return "grado";
+    }
+    if (!state.gAssignedToGroup) {
+      state.gAssignedToGroup = true;
+      return "grupo";
+    }
+  }
+
+  return ALIAS_LOOKUP[token] || trimmed;
+}
+
+function parseCsvLine(line, delimiter = ",") {
   const result = [];
   let current = "";
   let inQuotes = false;
@@ -16,7 +75,7 @@ function parseCsvLine(line) {
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (char === "," && !inQuotes) {
+    } else if (char === delimiter && !inQuotes) {
       result.push(current);
       current = "";
     } else {
@@ -26,6 +85,12 @@ function parseCsvLine(line) {
 
   result.push(current);
   return result.map((value) => value.trim());
+}
+
+function detectDelimiter(headerLine) {
+  const commaCount = (headerLine.match(/,/g) || []).length;
+  const semicolonCount = (headerLine.match(/;/g) || []).length;
+  return semicolonCount > commaCount ? ";" : ",";
 }
 
 function parseCsv(content) {
@@ -38,12 +103,12 @@ function parseCsv(content) {
     return { headers: [], rows: [] };
   }
 
-  const headers = parseCsvLine(lines[0]).map((header) =>
-    header.replace(/^\uFEFF/, "").trim()
-  );
+  const delimiter = detectDelimiter(lines[0]);
+  const state = { gAssignedToGrade: false, gAssignedToGroup: false };
+  const headers = parseCsvLine(lines[0], delimiter).map((header) => resolveHeader(header, state));
 
   const rows = lines.slice(1).map((line, index) => {
-    const values = parseCsvLine(line);
+    const values = parseCsvLine(line, delimiter);
     const row = {};
     headers.forEach((header, columnIndex) => {
       row[header] = values[columnIndex] || "";
