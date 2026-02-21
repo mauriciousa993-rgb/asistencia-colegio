@@ -1,5 +1,5 @@
-﻿// ==================== CONFIGURACION ====================
-const API_URL = window.API_URL || "http://localhost:5000/api";
+﻿﻿// ==================== CONFIGURACION ====================
+const API_URL = "https://asistencia-colegio.onrender.com/api";
 
 
 // ==================== ESTADO GLOBAL ====================
