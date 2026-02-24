@@ -1,4 +1,4 @@
-﻿﻿// ==================== CONFIGURACION ====================
+﻿﻿﻿﻿// ==================== CONFIGURACION ====================
 const API_URL = "https://asistencia-colegio.onrender.com/api";
 
 
@@ -212,6 +212,22 @@ function getHeaders() {
     "Authorization": `Bearer ${authToken}`
   };
 }
+
+// ==================== MANEJO DE ERRORES DE AUTENTICACION ====================
+function manejarErrorAutenticacion(response) {
+  if (response.status === 401 || response.status === 403) {
+    console.warn("Token inválido o expirado. Redirigiendo al login...");
+    authToken = null;
+    usuarioActual = null;
+    localStorage.removeItem("token");
+    localStorage.removeItem("usuario");
+    mostrarLogin();
+    alert("Tu sesión ha expirado. Por favor, inicia sesión nuevamente.");
+    return true;
+  }
+  return false;
+}
+
 
 // ==================== NAVEGACION ====================
 function cambiarVista(vista) {
@@ -772,10 +788,15 @@ async function handleImportarCsv(event) {
       body: JSON.stringify({ csvContent, dryRun })
     });
 
+    if (manejarErrorAutenticacion(response)) {
+      return;
+    }
+
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || "Error al importar CSV");
     }
+
 
     const errores = data.detalleErrores || [];
     const erroresHtml = errores.length
