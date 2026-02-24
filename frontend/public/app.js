@@ -1660,22 +1660,34 @@ function mostrarEstadoUsuarios(mensaje, color) {
 async function guardarUsuario(event) {
   event.preventDefault();
   if (usuarioActual?.rol !== "admin") {
-    mostrarEstadoUsuarios("Solo administradores pueden crear usuarios.", "red");
+    mostrarEstadoUsuarios("Solo administradores pueden gestionar usuarios.", "red");
     return;
   }
 
+  const esEdicion = Boolean(usuarioEditandoId);
   const rol = document.getElementById("usuario-rol").value;
   const payload = {
     nombre: document.getElementById("usuario-nombre").value.trim(),
     username: document.getElementById("usuario-username").value.trim(),
-    password: document.getElementById("usuario-password").value,
     rol,
     gradoAsignado: document.getElementById("usuario-grado").value,
     grupoAsignado: document.getElementById("usuario-grupo").value
   };
 
-  if (!payload.nombre || !payload.username || !payload.password) {
-    mostrarEstadoUsuarios("Nombre, usuario y contrasena son obligatorios.", "red");
+  // Solo incluir password si se proporciona (para edición, es opcional)
+  const password = document.getElementById("usuario-password").value;
+  if (password) {
+    payload.password = password;
+  }
+
+  if (!payload.nombre || !payload.username) {
+    mostrarEstadoUsuarios("Nombre y usuario son obligatorios.", "red");
+    return;
+  }
+
+  // En creación, la contraseña es obligatoria
+  if (!esEdicion && !password) {
+    mostrarEstadoUsuarios("La contraseña es obligatoria para nuevos usuarios.", "red");
     return;
   }
 
@@ -1687,28 +1699,30 @@ async function guardarUsuario(event) {
   const btnCrear = document.getElementById("btn-crear-usuario");
   try {
     btnCrear.disabled = true;
-    btnCrear.textContent = "Creando...";
+    btnCrear.textContent = esEdicion ? "Guardando..." : "Creando...";
 
-    const response = await fetch(`${API_URL}/usuarios`, {
-      method: "POST",
+    const url = esEdicion ? `${API_URL}/usuarios/${usuarioEditandoId}` : `${API_URL}/usuarios`;
+    const method = esEdicion ? "PUT" : "POST";
+
+    const response = await fetch(url, {
+      method,
       headers: getHeaders(),
       body: JSON.stringify(payload)
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || "No se pudo crear el usuario.");
+      throw new Error(data.error || (esEdicion ? "No se pudo actualizar el usuario." : "No se pudo crear el usuario."));
     }
 
-    document.getElementById("form-usuario").reset();
-    document.getElementById("usuario-rol").value = "profesor";
-    actualizarFormularioUsuarioSegunRol();
-    mostrarEstadoUsuarios("Usuario creado correctamente.", "green");
+    // Resetear formulario y estado de edición
+    cancelarEdicionUsuario();
+    mostrarEstadoUsuarios(esEdicion ? "Usuario actualizado correctamente." : "Usuario creado correctamente.", "green");
     await cargarUsuarios();
   } catch (error) {
     mostrarEstadoUsuarios(error.message, "red");
   } finally {
     btnCrear.disabled = false;
-    btnCrear.textContent = "Crear Usuario";
+    btnCrear.textContent = esEdicion ? "Guardar Cambios" : "Crear Usuario";
   }
 }
 
@@ -1718,13 +1732,15 @@ function renderTablaUsuarios(usuarios) {
   tbody.innerHTML = "";
 
   if (!usuarios.length) {
-    tbody.innerHTML = "<tr><td colspan='6' class='px-4 py-4 text-center text-slate-500'>No hay usuarios registrados.</td></tr>";
+    tbody.innerHTML = "<tr><td colspan='7' class='px-4 py-4 text-center text-slate-500'>No hay usuarios registrados.</td></tr>";
     return;
   }
 
   usuarios.forEach((usuario) => {
+    const usuarioId = String(usuario._id || "");
+    const esUsuarioActual = String(usuarioActual?.id) === usuarioId;
     const tr = document.createElement("tr");
-    tr.className = "border-b";
+    tr.className = "border-b hover:bg-slate-50";
     tr.innerHTML = `
       <td class="px-4 py-2">${usuario.nombre || "-"}</td>
       <td class="px-4 py-2">${usuario.username || "-"}</td>
@@ -1732,9 +1748,94 @@ function renderTablaUsuarios(usuarios) {
       <td class="px-4 py-2">${usuario.gradoAsignado ? formatearGrado(usuario.gradoAsignado) : "-"}</td>
       <td class="px-4 py-2">${usuario.grupoAsignado ? normalizarGrupo(usuario.grupoAsignado) : "-"}</td>
       <td class="px-4 py-2">${usuario.fechaCreacion ? new Date(usuario.fechaCreacion).toLocaleDateString() : "-"}</td>
+      <td class="px-4 py-2 text-center whitespace-nowrap">
+        <button onclick="editarUsuario('${usuarioId}')" class="text-yellow-600 hover:text-yellow-800 mr-2" title="Editar usuario" ${usuarioId ? "" : "disabled"}>
+          <i class="fas fa-edit"></i>
+        </button>
+        <button onclick="eliminarUsuario('${usuarioId}')" class="text-red-600 hover:text-red-800" title="Eliminar usuario" ${usuarioId && !esUsuarioActual ? "" : "disabled"}>
+          <i class="fas fa-trash"></i>
+        </button>
+      </td>
     `;
     tbody.appendChild(tr);
   });
+}
+
+async function editarUsuario(usuarioId) {
+  const usuario = usuariosSistema.find((u) => String(u._id) === String(usuarioId));
+  if (!usuario) {
+    mostrarEstadoUsuarios("No se encontró el usuario seleccionado.", "red");
+    return;
+  }
+
+  // Cargar datos en el formulario
+  usuarioEditandoId = usuarioId;
+  document.getElementById("usuario-id").value = usuarioId;
+  document.getElementById("usuario-nombre").value = usuario.nombre || "";
+  document.getElementById("usuario-username").value = usuario.username || "";
+  document.getElementById("usuario-rol").value = usuario.rol || "profesor";
+  document.getElementById("usuario-grado").value = usuario.gradoAsignado || "";
+  document.getElementById("usuario-grupo").value = usuario.grupoAsignado || "";
+  
+  // Limpiar campo de contraseña y hacerlo opcional para edición
+  const passwordInput = document.getElementById("usuario-password");
+  passwordInput.value = "";
+  passwordInput.placeholder = "Dejar en blanco para mantener la actual";
+  passwordInput.required = false;
+
+  // Actualizar UI
+  const btnCrear = document.getElementById("btn-crear-usuario");
+  const btnCancelar = document.getElementById("btn-cancelar-edicion-usuario");
+  const titulo = document.getElementById("usuario-form-titulo");
+  
+  if (btnCrear) btnCrear.textContent = "Guardar Cambios";
+  if (btnCancelar) btnCancelar.classList.remove("hidden");
+  if (titulo) titulo.textContent = "Editar Usuario";
+  
+  actualizarFormularioUsuarioSegunRol();
+  mostrarEstadoUsuarios("Editando usuario seleccionado. Modifica los campos y guarda los cambios.", "yellow");
+  
+  // Scroll al formulario
+  document.getElementById("form-usuario").scrollIntoView({ behavior: "smooth" });
+}
+
+async function eliminarUsuario(usuarioId) {
+  if (!usuarioId) {
+    mostrarEstadoUsuarios("No se pudo identificar el usuario a eliminar.", "red");
+    return;
+  }
+
+  // Verificar que no sea el usuario actual
+  if (String(usuarioActual?.id) === String(usuarioId)) {
+    mostrarEstadoUsuarios("No puedes eliminar tu propio usuario.", "red");
+    return;
+  }
+
+  const usuario = usuariosSistema.find((u) => String(u._id) === String(usuarioId));
+  if (!usuario) {
+    mostrarEstadoUsuarios("Usuario no encontrado.", "red");
+    return;
+  }
+
+  if (!confirm(`¿Estás seguro de eliminar al usuario \"${usuario.nombre}\" (${usuario.username})? Esta acción no se puede deshacer.`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/usuarios/${usuarioId}`, {
+      method: "DELETE",
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo eliminar el usuario.");
+    }
+
+    mostrarEstadoUsuarios("Usuario eliminado correctamente.", "green");
+    await cargarUsuarios();
+  } catch (error) {
+    mostrarEstadoUsuarios(error.message, "red");
+  }
 }
 
 async function cargarUsuarios() {

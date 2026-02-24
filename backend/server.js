@@ -6,11 +6,19 @@ const mongoose = require("mongoose");
 const path = require("path");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const fs = require("fs");
 const {
   REQUIRED_HEADERS,
   parseCsv,
   buildStudentFromRow
 } = require("./utils/estudiantesCsv");
+
+// Logger simple para operaciones críticas
+const logger = {
+  info: (msg) => console.log(`[INFO] ${new Date().toISOString()}: ${msg}`),
+  warn: (msg) => console.warn(`[WARN] ${new Date().toISOString()}: ${msg}`),
+  error: (msg) => console.error(`[ERROR] ${new Date().toISOString()}: ${msg}`)
+};
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -264,8 +272,23 @@ function canAccessStudent(reqUser, estudiante) {
 // ============ CONEXIÓN A MONGODB ============
 mongoose
   .connect(MONGODB_URI)
-  .then(() => console.log("MongoDB conectado"))
-  .catch((error) => console.error("Error conectando a MongoDB:", error));
+  .then(() => {
+    console.log("MongoDB conectado");
+    logger.info("Conexión a MongoDB establecida exitosamente");
+  })
+  .catch((error) => {
+    console.error("Error conectando a MongoDB:", error);
+    logger.error(`Error crítico conectando a MongoDB: ${error.message}`);
+  });
+
+// Monitorear estado de la conexión
+mongoose.connection.on("disconnected", () => {
+  logger.warn("MongoDB desconectado - posible pérdida de conectividad");
+});
+
+mongoose.connection.on("error", (err) => {
+  logger.error(`Error en conexión MongoDB: ${err.message}`);
+});
 
 // ============ MIDDLEWARE DE AUTENTICACIÓN ============
 const autenticarToken = (req, res, next) => {
@@ -497,6 +520,40 @@ app.delete("/api/usuarios/:id", autenticarToken, async (req, res) => {
   }
 });
 
+// ============ ENDPOINTS DE SALUD Y MONITOREO ============
+
+// Health check - verificar estado del sistema
+app.get("/api/health", async (req, res) => {
+  try {
+    const dbState = mongoose.connection.readyState;
+    const dbStatus = {
+      0: "desconectado",
+      1: "conectado",
+      2: "conectando",
+      3: "desconectando"
+    };
+    
+    // Contar estudiantes en la base de datos
+    const countEstudiantes = await Estudiante.countDocuments();
+    
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      database: {
+        state: dbStatus[dbState] || "desconocido",
+        estudiantes: countEstudiantes
+      },
+      uptime: process.uptime()
+    });
+  } catch (error) {
+    logger.error(`Error en health check: ${error.message}`);
+    res.status(500).json({ 
+      status: "error", 
+      error: "No se pudo verificar el estado del sistema" 
+    });
+  }
+});
+
 // ============ ENDPOINTS DE ESTUDIANTES ============
 
 // Obtener todos los estudiantes (con filtros opcionales)
@@ -558,6 +615,15 @@ app.post("/api/estudiantes/importar-csv", autenticarToken, async (req, res) => {
       return res.status(400).json({ error: "El CSV no contiene filas para importar" });
     }
 
+    // Validación de seguridad: prevenir importación masiva accidental
+    const countActual = await Estudiante.countDocuments();
+    if (!dryRun && rows.length > 500 && countActual > 0) {
+      logger.warn(`Intento de importación masiva: ${rows.length} registros (actual: ${countActual})`);
+      return res.status(400).json({ 
+        error: "Importación masiva detectada. Usa dryRun=true primero para validar, o contacta soporte." 
+      });
+    }
+
     const missingHeaders = REQUIRED_HEADERS.filter((header) => !headers.includes(header));
     if (missingHeaders.length) {
       return res.status(400).json({
@@ -578,11 +644,13 @@ app.post("/api/estudiantes/importar-csv", autenticarToken, async (req, res) => {
         if (existing) {
           if (!dryRun) {
             await Estudiante.updateOne({ _id: existing._id }, data, { runValidators: true });
+            logger.info(`Estudiante actualizado: ${data.identificacion} - ${data.nombre}`);
           }
           updated += 1;
         } else {
           if (!dryRun) {
             await Estudiante.create(data);
+            logger.info(`Estudiante creado: ${data.identificacion} - ${data.nombre}`);
           }
           created += 1;
         }
@@ -591,6 +659,9 @@ app.post("/api/estudiantes/importar-csv", autenticarToken, async (req, res) => {
         errors.push(`Linea ${item.lineNumber}: ${error.message}`);
       }
     }
+
+    // Log de la operación completa
+    logger.info(`Importación CSV completada por ${req.user.username}: ${created} creados, ${updated} actualizados, ${failed} errores (dryRun: ${dryRun})`);
 
     return res.json({
       message: dryRun ? "Validacion completada (dry run)" : "Importacion completada",
@@ -602,6 +673,7 @@ app.post("/api/estudiantes/importar-csv", autenticarToken, async (req, res) => {
       detalleErrores: errors.slice(0, 100)
     });
   } catch (error) {
+    logger.error(`Error en importación CSV: ${error.message}`);
     return res.status(500).json({ error: "Error al importar CSV" });
   }
 });
@@ -708,13 +780,19 @@ app.delete("/api/estudiantes/:id", autenticarToken, async (req, res) => {
       return res.status(403).json({ error: "Solo administradores pueden eliminar estudiantes" });
     }
 
-    const estudianteEliminado = await Estudiante.findByIdAndDelete(req.params.id);
-    if (!estudianteEliminado) {
+    const estudiante = await Estudiante.findById(req.params.id);
+    if (!estudiante) {
       return res.status(404).json({ error: "Estudiante no encontrado" });
     }
+
+    // Log antes de eliminar para auditoría
+    logger.warn(`Eliminación de estudiante por ${req.user.username}: ID=${req.params.id}, Nombre=${estudiante.nombre}, Identificación=${estudiante.identificacion}`);
+
+    await Estudiante.findByIdAndDelete(req.params.id);
     
-    res.json({ message: "Estudiante eliminado" });
+    res.json({ message: "Estudiante eliminado", estudiante: { nombre: estudiante.nombre, identificacion: estudiante.identificacion } });
   } catch (error) {
+    logger.error(`Error al eliminar estudiante ${req.params.id}: ${error.message}`);
     res.status(500).json({ error: "Error al eliminar estudiante" });
   }
 });
@@ -1482,6 +1560,27 @@ app.get("/api/reportes/estadisticas", autenticarToken, async (req, res) => {
   }
 });
 
+// Función para crear backup de estudiantes
+const crearBackupEstudiantes = async () => {
+  try {
+    const estudiantes = await Estudiante.find({}, { __v: 0 }).lean();
+    const backupPath = path.join(__dirname, "data", `backup-estudiantes-${new Date().toISOString().split("T")[0]}.json`);
+    
+    // Asegurar que existe la carpeta data
+    const dataDir = path.join(__dirname, "data");
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    
+    fs.writeFileSync(backupPath, JSON.stringify(estudiantes, null, 2));
+    logger.info(`Backup de estudiantes creado: ${estudiantes.length} registros en ${backupPath}`);
+    return backupPath;
+  } catch (error) {
+    logger.error(`Error creando backup: ${error.message}`);
+    return null;
+  }
+};
+
 // Inicializar usuario admin por defecto si no existe
 const inicializarAdmin = async () => {
   try {
@@ -1499,9 +1598,17 @@ const inicializarAdmin = async () => {
       
       await admin.save();
       console.log("Usuario admin creado: admin / admin123");
+      logger.info("Usuario admin inicial creado");
+    }
+    
+    // Crear backup inicial si hay estudiantes
+    const countEstudiantes = await Estudiante.countDocuments();
+    if (countEstudiantes > 0) {
+      await crearBackupEstudiantes();
     }
   } catch (error) {
     console.error("Error al inicializar admin:", error);
+    logger.error(`Error en inicialización: ${error.message}`);
   }
 };
 
@@ -1509,4 +1616,5 @@ inicializarAdmin();
 
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en puerto ${PORT}`);
+  logger.info(`Servidor iniciado en puerto ${PORT}`);
 });

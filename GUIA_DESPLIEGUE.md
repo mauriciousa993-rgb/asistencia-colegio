@@ -45,7 +45,7 @@ git push -u origin main
    - Guarda estas credenciales
 5. En **Network Access**:
    - Agrega IP: `0.0.0.0/0` (permite acceso desde cualquier lugar)
-6. Obtén la **URI de conexión**:
+6. Obtén la **URI de conexión**:mongodb+srv://asistencia:<db_password>@asistenciacolegio.nar4uuf.mongodb.net/?appName=asistenciacolegio
    ```
    mongodb+srv://usuario:password@cluster.mongodb.net/asistencia-colegio?retryWrites=true&w=majority
    ```

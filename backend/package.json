@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "import:estudiantes": "node scripts/import-estudiantes.js"
+    "import:estudiantes": "node scripts/import-estudiantes.js",
+    "backup:estudiantes": "node scripts/backup-estudiantes.js",
+    "restore:estudiantes": "node scripts/restore-estudiantes.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
