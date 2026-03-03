@@ -15,6 +15,7 @@ let convivenciaEstudianteActualId = "";
 let convivenciaReporteEditandoId = "";
 let reportesConvivenciaActuales = [];
 let usuariosSistema = [];
+let usuarioEditandoId = "";
 let registrosAsistenciaGestion = [];
 let registroAsistenciaEditando = { registroId: "", estudianteId: "" };
 
@@ -1641,12 +1642,37 @@ function setupUsuarios() {
   const form = document.getElementById("form-usuario");
   const selectRol = document.getElementById("usuario-rol");
   const btnRecargar = document.getElementById("btn-recargar-usuarios");
+  const btnCancelar = document.getElementById("btn-cancelar-edicion-usuario");
 
   if (!form || !selectRol || !btnRecargar) return;
 
   form.addEventListener("submit", guardarUsuario);
   selectRol.addEventListener("change", actualizarFormularioUsuarioSegunRol);
   btnRecargar.addEventListener("click", cargarUsuarios);
+  if (btnCancelar) {
+    btnCancelar.addEventListener("click", cancelarEdicionUsuario);
+  }
+  actualizarFormularioUsuarioSegunRol();
+}
+
+function cancelarEdicionUsuario() {
+  usuarioEditandoId = "";
+
+  const form = document.getElementById("form-usuario");
+  const btnCrear = document.getElementById("btn-crear-usuario");
+  const btnCancelar = document.getElementById("btn-cancelar-edicion-usuario");
+  const titulo = document.getElementById("usuario-form-titulo");
+  const passwordInput = document.getElementById("usuario-password");
+
+  if (form) form.reset();
+  if (btnCrear) btnCrear.textContent = "Crear Usuario";
+  if (btnCancelar) btnCancelar.classList.add("hidden");
+  if (titulo) titulo.textContent = "Crear Usuario";
+  if (passwordInput) {
+    passwordInput.placeholder = "";
+    passwordInput.required = true;
+  }
+
   actualizarFormularioUsuarioSegunRol();
 }
 
