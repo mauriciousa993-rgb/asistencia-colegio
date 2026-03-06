@@ -1901,8 +1901,7 @@ function setupReportes() {
   document.getElementById("reportes-conv-grado").addEventListener("change", cargarReportesConvivenciaGestion);
   document.getElementById("reportes-conv-grupo").addEventListener("change", cargarReportesConvivenciaGestion);
   document.getElementById("reportes-conv-estado-filtro").addEventListener("change", cargarReportesConvivenciaGestion);
-  document.getElementById("reportes-conv-fecha-desde").addEventListener("change", cargarReportesConvivenciaGestion);
-  document.getElementById("reportes-conv-fecha-hasta").addEventListener("change", cargarReportesConvivenciaGestion);
+  document.getElementById("reportes-conv-fecha-dia").addEventListener("change", cargarReportesConvivenciaGestion);
 
   document.getElementById("btn-cerrar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
   document.getElementById("btn-cancelar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
@@ -1931,6 +1930,19 @@ function renderTablaReportesConvivenciaGestion(reportes) {
   const contenedor = document.getElementById("reportes-conv-lista");
   if (!contenedor) return;
   contenedor.innerHTML = "";
+  const fechaDia = document.getElementById("reportes-conv-fecha-dia")?.value || "";
+
+  function normalizarFechaDia(fecha) {
+    if (!fecha) return null;
+    const parsed = new Date(`${fecha}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const fechaFiltroDesde = normalizarFechaDia(fechaDia);
+  const fechaFiltroHasta = fechaFiltroDesde ? new Date(fechaFiltroDesde) : null;
+  if (fechaFiltroHasta) {
+    fechaFiltroHasta.setHours(23, 59, 59, 999);
+  }
 
   if (!reportes.length) {
     contenedor.innerHTML = "<div class='text-sm text-slate-500 text-center py-4'>No hay registros de asistencia para los filtros aplicados.</div>";
@@ -1962,11 +1974,18 @@ function renderTablaReportesConvivenciaGestion(reportes) {
   });
 
   salones.forEach((llave) => {
-    const registrosSalon = registrosPorSalon[llave].slice().sort((a, b) => {
-      const fechaA = a?.fecha ? new Date(a.fecha) : 0;
-      const fechaB = b?.fecha ? new Date(b.fecha) : 0;
-      return fechaB - fechaA;
-    });
+    const registrosSalon = registrosPorSalon[llave]
+      .filter((reporte) => {
+        if (!fechaFiltroDesde || !reporte?.fecha) return true;
+        const fechaReporte = new Date(reporte.fecha);
+        if (Number.isNaN(fechaReporte.getTime())) return false;
+        return fechaReporte >= fechaFiltroDesde && fechaReporte <= fechaFiltroHasta;
+      })
+      .slice().sort((a, b) => {
+        const fechaA = a?.fecha ? new Date(a.fecha) : 0;
+        const fechaB = b?.fecha ? new Date(b.fecha) : 0;
+        return fechaB - fechaA;
+      });
 
     const [grado, grupo] = llave.split("|");
     const detalle = document.createElement("details");
@@ -1980,17 +1999,11 @@ function renderTablaReportesConvivenciaGestion(reportes) {
     const panel = document.createElement("div");
     panel.className = "p-3 border-t border-slate-200 bg-white";
     panel.innerHTML = `
-      <div class="grid md:grid-cols-3 gap-3 mb-4">
-        <input type="date" class="reportes-salon-fecha-desde border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Desde">
-        <input type="date" class="reportes-salon-fecha-hasta border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Hasta">
-        <button type="button" class="reportes-btn-filtrar-salon bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 text-sm">Filtrar</button>
-      </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-slate-50">
             <tr>
               <th class="px-4 py-2 text-left">Fecha</th>
-              <th class="px-4 py-2 text-left">Hora</th>
               <th class="px-4 py-2 text-left">Estudiante</th>
               <th class="px-4 py-2 text-left">Tipo</th>
               <th class="px-4 py-2 text-left">Observacion</th>
@@ -2007,33 +2020,8 @@ function renderTablaReportesConvivenciaGestion(reportes) {
 
     const tbodySalon = panel.querySelector(`#reportes-salon-${grado}-${grupo}`);
     const totalSalon = panel.parentElement.querySelector(`#reportes-salon-total-${grado}-${grupo}`);
-    const inputDesde = panel.querySelector(".reportes-salon-fecha-desde");
-    const inputHasta = panel.querySelector(".reportes-salon-fecha-hasta");
-    const btnFiltrarSalon = panel.querySelector(".reportes-btn-filtrar-salon");
-
-    function normalizarFechaRango(fecha) {
-      if (!fecha) return null;
-      const parsed = new Date(`${fecha}T00:00:00`);
-      return Number.isNaN(parsed.getTime()) ? null : parsed;
-    }
-
-    function filtrarYRenderizarSalon() {
-      const desde = normalizarFechaRango(inputDesde.value);
-      const hasta = normalizarFechaRango(inputHasta.value);
-      const fechaHasta = hasta ? new Date(hasta) : null;
-      if (fechaHasta) {
-        fechaHasta.setHours(23, 59, 59, 999);
-      }
-
-      const filtrados = registrosSalon.filter((reporte) => {
-        if (!reporte?.fecha) return false;
-        const fechaReporte = new Date(reporte.fecha);
-        if (Number.isNaN(fechaReporte.getTime())) return false;
-        const fechaSinHora = new Date(fechaReporte.getFullYear(), fechaReporte.getMonth(), fechaReporte.getDate());
-        if (desde && fechaSinHora < desde) return false;
-        if (fechaHasta && fechaSinHora > fechaHasta) return false;
-        return true;
-      }).sort((a, b) => {
+    function renderTablaSalonConFiltro() {
+      const filtrados = registrosSalon.sort((a, b) => {
         const fechaA = a?.fecha ? new Date(a.fecha) : 0;
         const fechaB = b?.fecha ? new Date(b.fecha) : 0;
         return fechaB - fechaA;
@@ -2041,7 +2029,7 @@ function renderTablaReportesConvivenciaGestion(reportes) {
 
       totalSalon.textContent = `(${filtrados.length} registro(s))`;
       if (!filtrados.length) {
-        tbodySalon.innerHTML = "<tr><td colspan='7' class='px-4 py-4 text-center text-slate-500'>No hay registros para este rango de fecha.</td></tr>";
+        tbodySalon.innerHTML = "<tr><td colspan='6' class='px-4 py-4 text-center text-slate-500'>No hay registros para la fecha seleccionada.</td></tr>";
         return;
       }
 
@@ -2051,7 +2039,6 @@ function renderTablaReportesConvivenciaGestion(reportes) {
         tr.className = "border-b hover:bg-slate-50";
         tr.innerHTML = `
           <td class="px-4 py-2">${r.fecha ? new Date(r.fecha).toLocaleDateString() : "-"}</td>
-          <td class="px-4 py-2">${r.hora || "-"}</td>
           <td class="px-4 py-2">${r.estudianteNombre || "-"}</td>
           <td class="px-4 py-2">${formatearTipoAsistencia(r.tipo)}</td>
           <td class="px-4 py-2">${r.observacion || "-"}</td>
@@ -2069,10 +2056,7 @@ function renderTablaReportesConvivenciaGestion(reportes) {
       });
     }
 
-    btnFiltrarSalon.addEventListener("click", filtrarYRenderizarSalon);
-    inputDesde.addEventListener("change", filtrarYRenderizarSalon);
-    inputHasta.addEventListener("change", filtrarYRenderizarSalon);
-    filtrarYRenderizarSalon();
+    renderTablaSalonConFiltro();
   });
 }
 
@@ -2082,15 +2066,16 @@ async function cargarReportesConvivenciaGestion() {
     const grado = document.getElementById("reportes-conv-grado").value;
     const grupo = document.getElementById("reportes-conv-grupo").value;
     const tipo = document.getElementById("reportes-conv-estado-filtro").value;
-    const fechaDesde = document.getElementById("reportes-conv-fecha-desde").value;
-    const fechaHasta = document.getElementById("reportes-conv-fecha-hasta").value;
+    const fechaDia = document.getElementById("reportes-conv-fecha-dia").value;
     const busqueda = document.getElementById("reportes-conv-busqueda").value.trim();
 
     if (grado) params.append("grado", grado);
     if (grupo) params.append("grupo", grupo);
     if (tipo) params.append("tipo", tipo);
-    if (fechaDesde) params.append("fechaDesde", fechaDesde);
-    if (fechaHasta) params.append("fechaHasta", fechaHasta);
+    if (fechaDia) {
+      params.append("fechaDesde", fechaDia);
+      params.append("fechaHasta", fechaDia);
+    }
     if (busqueda) params.append("busqueda", busqueda);
 
     const response = await fetch(`${API_URL}/asistencia/registros?${params.toString()}`, {
