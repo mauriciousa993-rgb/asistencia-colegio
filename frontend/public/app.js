@@ -1947,6 +1947,18 @@ function renderTablaReportesConvivenciaGestion(reportes) {
   if (fechaFiltroHasta) {
     fechaFiltroHasta.setHours(23, 59, 59, 999);
   }
+  function normalizarTexto(valor) {
+    return String(valor || "").trim().toLowerCase();
+  }
+  function compararEstudiantesYFecha(a, b) {
+    const nombreA = normalizarTexto(a?.estudianteNombre);
+    const nombreB = normalizarTexto(b?.estudianteNombre);
+    const cmpNombre = nombreA.localeCompare(nombreB, "es", { sensitivity: "base" });
+    if (cmpNombre !== 0) return cmpNombre;
+    const fechaA = a?.fecha ? new Date(a.fecha) : 0;
+    const fechaB = b?.fecha ? new Date(b.fecha) : 0;
+    return fechaA - fechaB;
+  }
 
   if (!reportes.length) {
     contenedor.innerHTML = "<div class='text-sm text-slate-500 text-center py-4'>No hay registros de asistencia para los filtros aplicados.</div>";
@@ -1986,9 +1998,7 @@ function renderTablaReportesConvivenciaGestion(reportes) {
         return fechaReporte >= fechaFiltroDesde && fechaReporte <= fechaFiltroHasta;
       })
       .slice().sort((a, b) => {
-        const fechaA = a?.fecha ? new Date(a.fecha) : 0;
-        const fechaB = b?.fecha ? new Date(b.fecha) : 0;
-        return fechaB - fechaA;
+        return compararEstudiantesYFecha(a, b);
       });
 
     const [grado, grupo] = llave.split("|");
@@ -2025,11 +2035,7 @@ function renderTablaReportesConvivenciaGestion(reportes) {
     const tbodySalon = panel.querySelector(`#reportes-salon-${grado}-${grupo}`);
     const totalSalon = panel.parentElement.querySelector(`#reportes-salon-total-${grado}-${grupo}`);
     function renderTablaSalonConFiltro() {
-      const filtrados = registrosSalon.sort((a, b) => {
-        const fechaA = a?.fecha ? new Date(a.fecha) : 0;
-        const fechaB = b?.fecha ? new Date(b.fecha) : 0;
-        return fechaB - fechaA;
-      });
+      const filtrados = [...registrosSalon];
 
       totalSalon.textContent = `(${filtrados.length} registro(s))`;
       if (!filtrados.length) {
