@@ -1957,7 +1957,7 @@ function renderTablaReportesConvivenciaGestion(reportes) {
     if (cmpNombre !== 0) return cmpNombre;
     const fechaA = a?.fecha ? new Date(a.fecha) : 0;
     const fechaB = b?.fecha ? new Date(b.fecha) : 0;
-    return fechaA - fechaB;
+    return fechaB - fechaA;
   }
 
   if (!reportes.length) {
