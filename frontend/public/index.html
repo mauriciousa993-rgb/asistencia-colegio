@@ -235,6 +235,7 @@
             class="w-full border border-slate-300 rounded-lg px-4 py-2 focus:outline-none focus:ring focus:ring-blue-200">
         </div>
         <p id="login-error" class="text-red-600 text-sm hidden"></p>
+        <p id="login-status" class="text-sm text-blue-700 hidden"></p>
         <button type="submit"
           class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">
           Iniciar Sesion
@@ -245,6 +246,7 @@
   </div>
 
   <!-- Main App (hidden until logged in) -->
+  <div id="global-toast" class="hidden fixed top-4 right-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm font-medium shadow-lg"></div>
   <div id="app" class="hidden">
     <!-- Navigation -->
     <nav class="main-nav shadow-lg">

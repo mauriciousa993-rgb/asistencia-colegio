@@ -24,6 +24,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "secreto_super_seguro_2024";
+const MONGODB_SERVER_SELECTION_TIMEOUT_MS = Number(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS || 10000);
+const STARTUP_STUDENT_BACKUP = process.env.STARTUP_STUDENT_BACKUP === "true";
 
 // Configuración de CORS
 const normalizeOrigin = (origin) => String(origin || "").trim().replace(/\/+$/, "");
@@ -100,6 +102,8 @@ const usuarioSchema = new mongoose.Schema({
   grupoAsignado: { type: String, default: "" },
   fechaCreacion: { type: Date, default: Date.now }
 });
+
+usuarioSchema.index({ username: 1 });
 
 const Usuario = mongoose.model("Usuario", usuarioSchema);
 
@@ -270,16 +274,18 @@ function canAccessStudent(reqUser, estudiante) {
 }
 
 // ============ CONEXIÓN A MONGODB ============
-mongoose
-  .connect(MONGODB_URI)
-  .then(() => {
-    console.log("MongoDB conectado");
-    logger.info("Conexión a MongoDB establecida exitosamente");
-  })
-  .catch((error) => {
-    console.error("Error conectando a MongoDB:", error);
-    logger.error(`Error crítico conectando a MongoDB: ${error.message}`);
+async function conectarMongoDB() {
+  if (!MONGODB_URI) {
+    throw new Error("Falta la variable MONGODB_URI");
+  }
+
+  await mongoose.connect(MONGODB_URI, {
+    serverSelectionTimeoutMS: MONGODB_SERVER_SELECTION_TIMEOUT_MS
   });
+
+  console.log("MongoDB conectado");
+  logger.info("Conexión a MongoDB establecida exitosamente");
+}
 
 // Monitorear estado de la conexión
 mongoose.connection.on("disconnected", () => {
@@ -319,7 +325,9 @@ app.post("/api/login", async (req, res) => {
       return res.status(400).json({ error: "Usuario y contraseña requeridos" });
     }
 
-    const usuario = await Usuario.findOne({ username });
+    const usuario = await Usuario.findOne({ username })
+      .select("_id username password nombre rol gradoAsignado grupoAsignado")
+      .lean();
     if (!usuario) {
       return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
     }
@@ -1608,10 +1616,12 @@ const inicializarAdmin = async () => {
       logger.info("Usuario admin inicial creado");
     }
     
-    // Crear backup inicial si hay estudiantes
-    const countEstudiantes = await Estudiante.countDocuments();
-    if (countEstudiantes > 0) {
-      await crearBackupEstudiantes();
+    // Ejecutar backup al inicio solo si se habilita por variable de entorno
+    if (STARTUP_STUDENT_BACKUP) {
+      const countEstudiantes = await Estudiante.countDocuments();
+      if (countEstudiantes > 0) {
+        await crearBackupEstudiantes();
+      }
     }
   } catch (error) {
     console.error("Error al inicializar admin:", error);
@@ -1619,9 +1629,18 @@ const inicializarAdmin = async () => {
   }
 };
 
-inicializarAdmin();
+async function iniciarServidor() {
+  await conectarMongoDB();
+  await inicializarAdmin();
 
-app.listen(PORT, () => {
-  console.log(`Servidor escuchando en puerto ${PORT}`);
-  logger.info(`Servidor iniciado en puerto ${PORT}`);
+  app.listen(PORT, () => {
+    console.log(`Servidor escuchando en puerto ${PORT}`);
+    logger.info(`Servidor iniciado en puerto ${PORT}`);
+  });
+}
+
+iniciarServidor().catch((error) => {
+  console.error("No se pudo iniciar el servidor:", error);
+  logger.error(`Fallo al iniciar el servidor: ${error.message}`);
+  process.exit(1);
 });

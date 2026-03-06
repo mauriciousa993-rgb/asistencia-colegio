@@ -18,6 +18,7 @@ let usuariosSistema = [];
 let usuarioEditandoId = "";
 let registrosAsistenciaGestion = [];
 let registroAsistenciaEditando = { registroId: "", estudianteId: "" };
+let toastTimeoutId = null;
 
 function normalizarTexto(value) {
   return String(value ?? "").replace(/\u00C2/g, "").trim();
@@ -130,10 +131,72 @@ function inicializarEventos() {
   setupUsuarios();
 }
 
+function leerJsonSeguro(response) {
+  return response.json().catch(() => ({}));
+}
+
+function mostrarEstadoLogin(mensaje = "", tipo = "info") {
+  const statusMsg = document.getElementById("login-status");
+  if (!statusMsg) return;
+
+  if (!mensaje) {
+    statusMsg.textContent = "";
+    statusMsg.className = "text-sm hidden";
+    return;
+  }
+
+  const clasesPorTipo = {
+    info: "text-sm text-blue-700",
+    success: "text-sm text-green-600",
+    error: "text-sm text-red-600"
+  };
+
+  statusMsg.textContent = mensaje;
+  statusMsg.className = clasesPorTipo[tipo] || clasesPorTipo.info;
+}
+
+function mostrarToastGlobal(mensaje, tipo = "success") {
+  const toast = document.getElementById("global-toast");
+  if (!toast || !mensaje) return;
+
+  if (toastTimeoutId) {
+    clearTimeout(toastTimeoutId);
+  }
+
+  const clasesPorTipo = {
+    success: "fixed top-4 right-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm font-medium shadow-lg bg-green-100 text-green-800 border border-green-200",
+    error: "fixed top-4 right-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm font-medium shadow-lg bg-red-100 text-red-800 border border-red-200",
+    info: "fixed top-4 right-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm font-medium shadow-lg bg-blue-100 text-blue-800 border border-blue-200"
+  };
+
+  toast.textContent = mensaje;
+  toast.className = clasesPorTipo[tipo] || clasesPorTipo.info;
+
+  toastTimeoutId = setTimeout(() => {
+    toast.textContent = "";
+    toast.className = "hidden fixed top-4 right-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm font-medium shadow-lg";
+  }, 3500);
+}
+
+function normalizarErrorLogin(error) {
+  const mensaje = String(error?.message || "").trim();
+
+  if (error?.name === "AbortError") {
+    return "El servidor tardó demasiado en responder. Intenta nuevamente.";
+  }
+
+  if (/Failed to fetch/i.test(mensaje) || /NetworkError/i.test(mensaje)) {
+    return "No se pudo conectar con el servidor. Si el servicio se está iniciando, espera unos segundos y vuelve a intentar.";
+  }
+
+  return mensaje || "Error al iniciar sesion.";
+}
+
 // ==================== AUTENTICACION ====================
 function mostrarLogin() {
   document.getElementById("login-page").classList.remove("hidden");
   document.getElementById("app").classList.add("hidden");
+  mostrarEstadoLogin();
 }
 
 function mostrarApp() {
@@ -161,9 +224,17 @@ function mostrarApp() {
       btnImportarCsv.classList.add("hidden");
     }
   }
-  cargarEstudiantes();
-  cargarEstadisticas();
-  cambiarVista("salones");
+  const mensajeLoginExitoso = sessionStorage.getItem("mensaje-login-exitoso");
+  if (mensajeLoginExitoso) {
+    sessionStorage.removeItem("mensaje-login-exitoso");
+    mostrarToastGlobal(mensajeLoginExitoso, "success");
+  }
+
+  requestAnimationFrame(() => {
+    cargarEstudiantes();
+    cargarEstadisticas();
+    cambiarVista("salones");
+  });
 }
 
 async function handleLogin(e) {
@@ -171,6 +242,31 @@ async function handleLogin(e) {
   const username = document.getElementById("username").value;
   const password = document.getElementById("password").value;
   const errorMsg = document.getElementById("login-error");
+  const submitButton = e.submitter || document.querySelector('#login-form button[type="submit"]');
+  const usernameInput = document.getElementById("username");
+  const passwordInput = document.getElementById("password");
+  let demoraTimeoutId = null;
+
+  if (submitButton && !submitButton.dataset.originalText) {
+    submitButton.dataset.originalText = submitButton.textContent.trim();
+  }
+
+  errorMsg.textContent = "";
+  errorMsg.classList.add("hidden");
+  mostrarEstadoLogin("Validando credenciales...", "info");
+
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Iniciando...";
+    submitButton.classList.add("opacity-70", "cursor-not-allowed");
+  }
+
+  usernameInput.disabled = true;
+  passwordInput.disabled = true;
+
+  demoraTimeoutId = setTimeout(() => {
+    mostrarEstadoLogin("Conectando con el servidor... esto puede tardar unos segundos.", "info");
+  }, 1500);
   
   try {
     const response = await fetch(`${API_URL}/login`, {
@@ -179,7 +275,7 @@ async function handleLogin(e) {
       body: JSON.stringify({ username, password })
     });
     
-    const data = await response.json();
+    const data = await leerJsonSeguro(response);
     
     if (!response.ok) {
       throw new Error(data.error || "Error al iniciar sesion");
@@ -191,11 +287,27 @@ async function handleLogin(e) {
     localStorage.setItem("token", authToken);
     localStorage.setItem("usuario", JSON.stringify(usuarioActual));
     
+    sessionStorage.setItem("mensaje-login-exitoso", `Inicio de sesion exitoso. Bienvenido, ${usuarioActual.nombre}.`);
     errorMsg.classList.add("hidden");
+    mostrarEstadoLogin("Inicio de sesion exitoso.", "success");
     mostrarApp();
   } catch (error) {
-    errorMsg.textContent = error.message;
+    errorMsg.textContent = normalizarErrorLogin(error);
     errorMsg.classList.remove("hidden");
+    mostrarEstadoLogin();
+  } finally {
+    if (demoraTimeoutId) {
+      clearTimeout(demoraTimeoutId);
+    }
+
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = submitButton.dataset.originalText || "Iniciar Sesion";
+      submitButton.classList.remove("opacity-70", "cursor-not-allowed");
+    }
+
+    usernameInput.disabled = false;
+    passwordInput.disabled = false;
   }
 }
 
