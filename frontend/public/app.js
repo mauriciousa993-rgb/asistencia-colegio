@@ -345,21 +345,19 @@ function setupAsistencia() {
     
     const tipo = document.getElementById("tipo").value;
     const fecha = document.getElementById("fecha-asistencia").value;
-    const hora = document.getElementById("hora").value;
     const observacion = document.getElementById("observacion").value;
     const fotoUrl = previewImg.src || "";
     
     try {
       await registrarAsistencia({
         estudianteId: estudianteSeleccionado._id,
-        fecha: construirFechaAsistenciaISO(fecha, hora),
+        fecha: construirFechaAsistenciaISO(fecha),
         tipo,
-        hora,
         observacion,
         fotoUrl
       });
       
-      mostrarEstado("Asistencia registrada correctamente.", "green");
+      mostrarEstado("Registro de asistencia guardado correctamente.", "green");
       form.reset();
       preview.classList.add("hidden");
       previewImg.src = "";
@@ -425,13 +423,9 @@ function setupSalones() {
   const seleccionarTodos = document.getElementById("seleccionar-todos");
   const tipoGeneral = document.getElementById("salon-tipo");
   const inputFecha = document.getElementById("salon-fecha");
-  const inputHora = document.getElementById("salon-hora");
 
   if (inputFecha && !inputFecha.value) {
     inputFecha.value = obtenerFechaHoy();
-  }
-  if (inputHora && !inputHora.value) {
-    inputHora.value = obtenerHoraActual();
   }
 
   btnCargarSalon.addEventListener("click", cargarEstudiantesSalon);
@@ -596,8 +590,7 @@ async function registrarAsistenciaSalon(registrarTodos) {
   }
 
   const fechaSeleccionada = document.getElementById("salon-fecha").value;
-  const hora = document.getElementById("salon-hora").value || obtenerHoraActual();
-  const fecha = construirFechaAsistenciaISO(fechaSeleccionada, hora);
+  const fecha = construirFechaAsistenciaISO(fechaSeleccionada);
 
   const peticiones = filasObjetivo.map((fila) => {
     const tipo = fila.querySelector(".salon-tipo").value;
@@ -607,7 +600,6 @@ async function registrarAsistenciaSalon(registrarTodos) {
       estudianteId: fila.dataset.estudianteId,
       fecha,
       tipo,
-      hora,
       observacion,
       fotoUrl: ""
     });
@@ -627,14 +619,14 @@ async function registrarAsistenciaSalon(registrarTodos) {
   sincronizarCheckboxGeneralSalon();
 
   if (exitosos && !fallidos) {
-    mostrarEstadoSalon(`Se registraron ${exitosos} asistencia(s) correctamente.`, "green");
+    mostrarEstadoSalon(`Registro(s) de asistencia guardado(s): ${exitosos}.`, "green");
     return;
   }
 
   if (exitosos && fallidos) {
     const primerError = resultados.find((resultado) => resultado.status === "rejected");
     const detalle = primerError?.reason?.message ? ` Primer error: ${primerError.reason.message}` : "";
-    mostrarEstadoSalon(`Registrados: ${exitosos}. Fallidos: ${fallidos}.${detalle}`, "yellow");
+    mostrarEstadoSalon(`Registro(s) guardados: ${exitosos}. Fallidos: ${fallidos}.${detalle}`, "yellow");
     return;
   }
 
@@ -650,11 +642,6 @@ function mostrarEstadoSalon(mensaje, color) {
   estado.className = `mt-3 text-sm text-${color}-600`;
 }
 
-function obtenerHoraActual() {
-  const ahora = new Date();
-  return `${String(ahora.getHours()).padStart(2, "0")}:${String(ahora.getMinutes()).padStart(2, "0")}`;
-}
-
 function obtenerFechaHoy() {
   const ahora = new Date();
   const anio = ahora.getFullYear();
@@ -663,15 +650,14 @@ function obtenerFechaHoy() {
   return `${anio}-${mes}-${dia}`;
 }
 
-function construirFechaAsistenciaISO(fecha, hora) {
+function construirFechaAsistenciaISO(fecha) {
   if (!fecha) {
     return new Date().toISOString();
   }
 
-  const horaNormalizada = hora || "00:00";
-  const fechaHoraLocal = new Date(`${fecha}T${horaNormalizada}:00`);
-  if (!Number.isNaN(fechaHoraLocal.getTime())) {
-    return fechaHoraLocal.toISOString();
+  const fechaLocal = new Date(`${fecha}T00:00:00`);
+  if (!Number.isNaN(fechaLocal.getTime())) {
+    return fechaLocal.toISOString();
   }
 
   return new Date().toISOString();
@@ -1544,14 +1530,13 @@ async function buscarPerfil(id) {
         tr.innerHTML = `
           <td class="px-4 py-2">${new Date(h.fecha).toLocaleDateString()}</td>
           <td class="px-4 py-2 font-medium ${tipoColor}">${formatearTipoAsistencia(h.tipo)}</td>
-          <td class="px-4 py-2">${h.hora || "-"}</td>
           <td class="px-4 py-2">${h.observacion || "-"}</td>
           <td class="px-4 py-2 text-sm text-slate-500">${h.registradoPor || "-"}</td>
         `;
         tbody.appendChild(tr);
       });
     } else {
-      tbody.innerHTML = "<tr><td colspan='5' class='px-4 py-4 text-center text-slate-500'>No hay registros de asistencia</td></tr>";
+      tbody.innerHTML = "<tr><td colspan='4' class='px-4 py-4 text-center text-slate-500'>No hay registros de asistencia</td></tr>";
     }
 
     renderResumenAsistenciaPerfil(resumenAsistencia);
@@ -1943,37 +1928,151 @@ function cerrarModalEditarReporteConvivenciaGestion() {
 }
 
 function renderTablaReportesConvivenciaGestion(reportes) {
-  const tbody = document.getElementById("tabla-reportes-conv");
-  if (!tbody) return;
-  tbody.innerHTML = "";
+  const contenedor = document.getElementById("reportes-conv-lista");
+  if (!contenedor) return;
+  contenedor.innerHTML = "";
 
   if (!reportes.length) {
-    tbody.innerHTML = "<tr><td colspan='9' class='px-4 py-4 text-center text-slate-500'>No hay registros de asistencia para los filtros aplicados.</td></tr>";
+    contenedor.innerHTML = "<div class='text-sm text-slate-500 text-center py-4'>No hay registros de asistencia para los filtros aplicados.</div>";
     return;
   }
 
+  const registrosPorSalon = {};
   reportes.forEach((r) => {
-    const tr = document.createElement("tr");
-    tr.className = "border-b hover:bg-slate-50";
-    tr.innerHTML = `
-      <td class="px-4 py-2">${r.fecha ? new Date(r.fecha).toLocaleDateString() : "-"}</td>
-      <td class="px-4 py-2">${r.hora || "-"}</td>
-      <td class="px-4 py-2">${r.estudianteNombre || "-"}</td>
-      <td class="px-4 py-2">${formatearGrado(r.grado)}</td>
-      <td class="px-4 py-2">${normalizarGrupo(r.grupo)}</td>
-      <td class="px-4 py-2">${formatearTipoAsistencia(r.tipo)}</td>
-      <td class="px-4 py-2">${r.observacion || "-"}</td>
-      <td class="px-4 py-2">${r.registradoPor || "-"}</td>
-      <td class="px-4 py-2 whitespace-nowrap">
-        <button onclick="editarReporteConvivenciaDesdeReportes('${r.registroId}','${r.estudianteId}')" class="text-yellow-600 hover:text-yellow-800 mr-2" title="Editar">
-          <i class="fas fa-edit"></i>
-        </button>
-        <button onclick="eliminarReporteConvivenciaDesdeReportes('${r.registroId}','${r.estudianteId}')" class="text-red-600 hover:text-red-800" title="Eliminar">
-          <i class="fas fa-trash"></i>
-        </button>
-      </td>
+    const grado = normalizarGrado(r.grado) || "-";
+    const grupo = normalizarGrupo(r.grupo) || "-";
+    const llave = `${grado}|${grupo}`;
+    if (!registrosPorSalon[llave]) {
+      registrosPorSalon[llave] = [];
+    }
+    registrosPorSalon[llave].push(r);
+  });
+
+  const salones = Object.keys(registrosPorSalon).sort((a, b) => {
+    const [gradoA, grupoA] = a.split("|");
+    const [gradoB, grupoB] = b.split("|");
+    const gradoNumA = Number(gradoA);
+    const gradoNumB = Number(gradoB);
+    const ambosNumericos = !Number.isNaN(gradoNumA) && !Number.isNaN(gradoNumB);
+    if (ambosNumericos && gradoNumA !== gradoNumB) return gradoNumA - gradoNumB;
+    if (!Number.isNaN(gradoNumA) && Number.isNaN(gradoNumB)) return -1;
+    if (Number.isNaN(gradoNumA) && !Number.isNaN(gradoNumB)) return 1;
+    if (gradoA !== gradoB) return gradoA.localeCompare(gradoB, "es");
+    return grupoA.localeCompare(grupoB, "es");
+  });
+
+  salones.forEach((llave) => {
+    const registrosSalon = registrosPorSalon[llave].slice().sort((a, b) => {
+      const fechaA = a?.fecha ? new Date(a.fecha) : 0;
+      const fechaB = b?.fecha ? new Date(b.fecha) : 0;
+      return fechaB - fechaA;
+    });
+
+    const [grado, grupo] = llave.split("|");
+    const detalle = document.createElement("details");
+    detalle.className = "border border-slate-200 rounded-lg overflow-hidden";
+
+    const summary = document.createElement("summary");
+    summary.className = "cursor-pointer select-none bg-slate-50 px-4 py-3 font-semibold text-slate-800 flex flex-wrap justify-between gap-2 items-center";
+    summary.innerHTML = `<span>${formatearGrado(grado)} - Grupo ${grupo}</span><span id="reportes-salon-total-${grado}-${grupo}" class="text-sm font-normal text-slate-600">(${registrosSalon.length} registro(s))</span>`;
+    detalle.appendChild(summary);
+
+    const panel = document.createElement("div");
+    panel.className = "p-3 border-t border-slate-200 bg-white";
+    panel.innerHTML = `
+      <div class="grid md:grid-cols-3 gap-3 mb-4">
+        <input type="date" class="reportes-salon-fecha-desde border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Desde">
+        <input type="date" class="reportes-salon-fecha-hasta border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Hasta">
+        <button type="button" class="reportes-btn-filtrar-salon bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 text-sm">Filtrar</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="px-4 py-2 text-left">Fecha</th>
+              <th class="px-4 py-2 text-left">Hora</th>
+              <th class="px-4 py-2 text-left">Estudiante</th>
+              <th class="px-4 py-2 text-left">Tipo</th>
+              <th class="px-4 py-2 text-left">Observacion</th>
+              <th class="px-4 py-2 text-left">Registrado por</th>
+              <th class="px-4 py-2 text-left">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="reportes-salon-${grado}-${grupo}"></tbody>
+        </table>
+      </div>
     `;
-    tbody.appendChild(tr);
+    detalle.appendChild(panel);
+    contenedor.appendChild(detalle);
+
+    const tbodySalon = panel.querySelector(`#reportes-salon-${grado}-${grupo}`);
+    const totalSalon = panel.parentElement.querySelector(`#reportes-salon-total-${grado}-${grupo}`);
+    const inputDesde = panel.querySelector(".reportes-salon-fecha-desde");
+    const inputHasta = panel.querySelector(".reportes-salon-fecha-hasta");
+    const btnFiltrarSalon = panel.querySelector(".reportes-btn-filtrar-salon");
+
+    function normalizarFechaRango(fecha) {
+      if (!fecha) return null;
+      const parsed = new Date(`${fecha}T00:00:00`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function filtrarYRenderizarSalon() {
+      const desde = normalizarFechaRango(inputDesde.value);
+      const hasta = normalizarFechaRango(inputHasta.value);
+      const fechaHasta = hasta ? new Date(hasta) : null;
+      if (fechaHasta) {
+        fechaHasta.setHours(23, 59, 59, 999);
+      }
+
+      const filtrados = registrosSalon.filter((reporte) => {
+        if (!reporte?.fecha) return false;
+        const fechaReporte = new Date(reporte.fecha);
+        if (Number.isNaN(fechaReporte.getTime())) return false;
+        const fechaSinHora = new Date(fechaReporte.getFullYear(), fechaReporte.getMonth(), fechaReporte.getDate());
+        if (desde && fechaSinHora < desde) return false;
+        if (fechaHasta && fechaSinHora > fechaHasta) return false;
+        return true;
+      }).sort((a, b) => {
+        const fechaA = a?.fecha ? new Date(a.fecha) : 0;
+        const fechaB = b?.fecha ? new Date(b.fecha) : 0;
+        return fechaB - fechaA;
+      });
+
+      totalSalon.textContent = `(${filtrados.length} registro(s))`;
+      if (!filtrados.length) {
+        tbodySalon.innerHTML = "<tr><td colspan='7' class='px-4 py-4 text-center text-slate-500'>No hay registros para este rango de fecha.</td></tr>";
+        return;
+      }
+
+      tbodySalon.innerHTML = "";
+      filtrados.forEach((r) => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b hover:bg-slate-50";
+        tr.innerHTML = `
+          <td class="px-4 py-2">${r.fecha ? new Date(r.fecha).toLocaleDateString() : "-"}</td>
+          <td class="px-4 py-2">${r.hora || "-"}</td>
+          <td class="px-4 py-2">${r.estudianteNombre || "-"}</td>
+          <td class="px-4 py-2">${formatearTipoAsistencia(r.tipo)}</td>
+          <td class="px-4 py-2">${r.observacion || "-"}</td>
+          <td class="px-4 py-2">${r.registradoPor || "-"}</td>
+          <td class="px-4 py-2 whitespace-nowrap">
+            <button onclick="editarReporteConvivenciaDesdeReportes('${r.registroId}','${r.estudianteId}')" class="text-yellow-600 hover:text-yellow-800 mr-2" title="Editar">
+              <i class="fas fa-edit"></i>
+            </button>
+            <button onclick="eliminarReporteConvivenciaDesdeReportes('${r.registroId}','${r.estudianteId}')" class="text-red-600 hover:text-red-800" title="Eliminar">
+              <i class="fas fa-trash"></i>
+            </button>
+          </td>
+        `;
+        tbodySalon.appendChild(tr);
+      });
+    }
+
+    btnFiltrarSalon.addEventListener("click", filtrarYRenderizarSalon);
+    inputDesde.addEventListener("change", filtrarYRenderizarSalon);
+    inputHasta.addEventListener("change", filtrarYRenderizarSalon);
+    filtrarYRenderizarSalon();
   });
 }
 
@@ -2021,7 +2120,6 @@ function editarReporteConvivenciaDesdeReportes(registroId, estudianteId) {
   registroAsistenciaEditando = { registroId: String(registroId), estudianteId: String(estudianteId) };
   document.getElementById("edit-rep-fecha").value = formatearFechaParaInput(reporte.fecha) || obtenerFechaHoy();
   document.getElementById("edit-rep-tipo").value = reporte.tipo || "presente";
-  document.getElementById("edit-rep-hora").value = reporte.hora || "";
   document.getElementById("edit-rep-observacion").value = reporte.observacion || "";
   document.getElementById("edit-rep-estado-msg").textContent = "";
   document.getElementById("edit-rep-estado-msg").className = "text-sm";
@@ -2056,7 +2154,6 @@ async function guardarEdicionReporteConvivenciaGestion(event) {
   const payload = {
     fecha: document.getElementById("edit-rep-fecha").value,
     tipo: document.getElementById("edit-rep-tipo").value,
-    hora: document.getElementById("edit-rep-hora").value,
     observacion: document.getElementById("edit-rep-observacion").value.trim()
   };
 

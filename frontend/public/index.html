@@ -317,7 +317,7 @@
           <div class="bg-white rounded-xl shadow p-6">
             <h2 class="text-xl font-semibold mb-4">Registrar asistencia</h2>
             <form id="form-asistencia" class="space-y-4">
-              <div class="grid md:grid-cols-3 gap-4">
+            <div class="grid md:grid-cols-2 gap-4">
                 <div>
                   <label class="block text-sm font-medium mb-1">Tipo</label>
                   <select id="tipo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
@@ -330,10 +330,6 @@
                 <div>
                   <label class="block text-sm font-medium mb-1">Fecha</label>
                   <input id="fecha-asistencia" type="date" class="w-full border border-slate-300 rounded-lg px-4 py-2">
-                </div>
-                <div>
-                  <label class="block text-sm font-medium mb-1">Hora</label>
-                  <input id="hora" type="time" class="w-full border border-slate-300 rounded-lg px-4 py-2">
                 </div>
               </div>
               <div>
@@ -397,19 +393,18 @@
                 <h3 id="salon-titulo" class="text-lg font-semibold"></h3>
                 <p id="salon-info" class="text-sm text-slate-600"></p>
               </div>
-              <div class="flex flex-wrap gap-2 items-center">
-                <select id="salon-tipo" class="border border-slate-300 rounded-lg px-4 py-2">
-                  <option value="presente">Presente</option>
-                  <option value="falta">Falta</option>
-                  <option value="retardo">Retardo</option>
-                  <option value="salida">Permiso</option>
-                </select>
-                <input id="salon-fecha" type="date" class="border border-slate-300 rounded-lg px-4 py-2">
-                <input id="salon-hora" type="time" class="border border-slate-300 rounded-lg px-4 py-2">
-                <button id="btn-registrar-todos" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">
-                  Registrar a todos
-                </button>
-              </div>
+                <div class="flex flex-wrap gap-2 items-center">
+                  <select id="salon-tipo" class="border border-slate-300 rounded-lg px-4 py-2">
+                    <option value="presente">Presente</option>
+                    <option value="falta">Falta</option>
+                    <option value="retardo">Retardo</option>
+                    <option value="salida">Permiso</option>
+                  </select>
+                  <input id="salon-fecha" type="date" class="border border-slate-300 rounded-lg px-4 py-2">
+                  <button id="btn-registrar-todos" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">
+                    Registrar a todos
+                  </button>
+                </div>
             </div>
             <p id="salon-estado" class="mt-3 text-sm"></p>
 
@@ -575,15 +570,14 @@
               <h3 class="font-semibold text-lg mb-3">Historial de Asistencia</h3>
               <div class="overflow-x-auto">
                 <table class="w-full text-sm">
-                  <thead class="bg-slate-50">
-                    <tr>
-                      <th class="px-4 py-2 text-left">Fecha</th>
-                      <th class="px-4 py-2 text-left">Tipo</th>
-                      <th class="px-4 py-2 text-left">Hora</th>
-                      <th class="px-4 py-2 text-left">Observacion</th>
-                      <th class="px-4 py-2 text-left">Registrado por</th>
-                    </tr>
-                  </thead>
+                <thead class="bg-slate-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left">Fecha</th>
+                    <th class="px-4 py-2 text-left">Tipo</th>
+                    <th class="px-4 py-2 text-left">Observacion</th>
+                    <th class="px-4 py-2 text-left">Registrado por</th>
+                  </tr>
+                </thead>
                   <tbody id="perfil-historial"></tbody>
                 </table>
               </div>
@@ -856,23 +850,8 @@
                 class="w-full border border-slate-300 rounded-lg px-4 py-2">
             </div>
             <p id="reportes-conv-estado" class="text-sm mb-3"></p>
-            <div class="overflow-x-auto max-h-96">
-              <table class="w-full text-sm">
-                <thead class="bg-slate-50 sticky top-0">
-                  <tr>
-                    <th class="px-4 py-2 text-left">Fecha</th>
-                    <th class="px-4 py-2 text-left">Hora</th>
-                    <th class="px-4 py-2 text-left">Estudiante</th>
-                    <th class="px-4 py-2 text-left">Grado</th>
-                    <th class="px-4 py-2 text-left">Grupo</th>
-                    <th class="px-4 py-2 text-left">Tipo</th>
-                    <th class="px-4 py-2 text-left">Observacion</th>
-                    <th class="px-4 py-2 text-left">Registrado por</th>
-                    <th class="px-4 py-2 text-left">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody id="tabla-reportes-conv"></tbody>
-              </table>
+            <div id="reportes-conv-lista" class="space-y-3 max-h-[60vh] overflow-y-auto">
+              <!-- Sección renderizada por salón -->
             </div>
           </div>
         </div>
@@ -1172,7 +1151,7 @@
       </div>
 
       <form id="form-editar-reporte-conv" class="space-y-4">
-        <div class="grid md:grid-cols-3 gap-4">
+        <div class="grid md:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium mb-1">Fecha</label>
             <input id="edit-rep-fecha" type="date" class="w-full border border-slate-300 rounded-lg px-4 py-2">
@@ -1185,10 +1164,6 @@
               <option value="retardo">Retardo</option>
               <option value="salida">Permiso</option>
             </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">Hora</label>
-            <input id="edit-rep-hora" type="time" class="w-full border border-slate-300 rounded-lg px-4 py-2">
           </div>
         </div>
         <div>
