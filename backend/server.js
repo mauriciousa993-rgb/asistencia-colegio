@@ -824,12 +824,16 @@ app.post("/api/asistencia", autenticarToken, async (req, res) => {
     if (!tipoNormalizado) {
       return res.status(400).json({ error: "Tipo de asistencia invalido" });
     }
+    const observacionNormalizada = typeof observacion === "string" ? observacion.trim() : "";
+    if (tipoNormalizado === "salida" && !observacionNormalizada) {
+      return res.status(400).json({ error: "La observación es obligatoria para registrar un permiso." });
+    }
 
     const nuevoRegistro = {
       fecha: fechaRegistro,
       tipo: tipoNormalizado,
       hora: typeof hora === "string" ? hora.trim() : "",
-      observacion: typeof observacion === "string" ? observacion.trim() : "",
+      observacion: observacionNormalizada,
       fotoUrl: typeof fotoUrl === "string" ? fotoUrl : "",
       registradoPor: req.user.nombre
     };
@@ -950,9 +954,12 @@ app.put("/api/asistencia/:estudianteId/:registroId", autenticarToken, async (req
         return res.status(400).json({ error: "Tipo de asistencia invalido" });
       }
     }
+    const observacionFinal = typeof observacion === "string" ? observacion.trim() : (registro.observacion || "");
+    if (tipoFinal === "salida" && !observacionFinal) {
+      return res.status(400).json({ error: "La observación es obligatoria para registrar un permiso." });
+    }
 
     const horaFinal = typeof hora === "string" ? hora.trim() : (registro.hora || "");
-    const observacionFinal = typeof observacion === "string" ? observacion.trim() : (registro.observacion || "");
     const fotoUrlFinal = typeof fotoUrl === "string" ? fotoUrl : (registro.fotoUrl || "");
 
     if (hasDuplicateAttendanceRecord(estudiante, {

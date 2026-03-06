@@ -345,8 +345,13 @@ function setupAsistencia() {
     
     const tipo = document.getElementById("tipo").value;
     const fecha = document.getElementById("fecha-asistencia").value;
-    const observacion = document.getElementById("observacion").value;
+    const observacion = document.getElementById("observacion").value.trim();
     const fotoUrl = previewImg.src || "";
+
+    if (tipo === "salida" && !observacion) {
+      mostrarEstado("La observación es obligatoria para registrar un permiso.", "red");
+      return;
+    }
     
     try {
       await registrarAsistencia({
@@ -591,6 +596,18 @@ async function registrarAsistenciaSalon(registrarTodos) {
 
   const fechaSeleccionada = document.getElementById("salon-fecha").value;
   const fecha = construirFechaAsistenciaISO(fechaSeleccionada);
+
+  const filaSinObservacionSalida = filasObjetivo.find((fila) => {
+    const tipo = fila.querySelector(".salon-tipo").value;
+    const observacion = fila.querySelector(".salon-observacion").value.trim();
+    return tipo === "salida" && !observacion;
+  });
+
+  if (filaSinObservacionSalida) {
+    const nombreEstudiante = filaSinObservacionSalida.querySelector("td:nth-child(2)")?.textContent?.trim() || "sin nombre";
+    mostrarEstadoSalon(`Agrega una observación para el permiso de ${nombreEstudiante}.`, "red");
+    return;
+  }
 
   const peticiones = filasObjetivo.map((fila) => {
     const tipo = fila.querySelector(".salon-tipo").value;
@@ -2145,15 +2162,20 @@ async function guardarEdicionReporteConvivenciaGestion(event) {
   event.preventDefault();
   const { registroId, estudianteId } = registroAsistenciaEditando;
   if (!registroId || !estudianteId) return;
+  const estadoMsg = document.getElementById("edit-rep-estado-msg");
+  const btnGuardar = document.getElementById("btn-guardar-modal-editar-reporte-conv");
 
   const payload = {
     fecha: document.getElementById("edit-rep-fecha").value,
     tipo: document.getElementById("edit-rep-tipo").value,
     observacion: document.getElementById("edit-rep-observacion").value.trim()
   };
+  if (payload.tipo === "salida" && !payload.observacion) {
+    estadoMsg.textContent = "La observación es obligatoria para permisos.";
+    estadoMsg.className = "text-sm text-red-600";
+    return;
+  }
 
-  const estadoMsg = document.getElementById("edit-rep-estado-msg");
-  const btnGuardar = document.getElementById("btn-guardar-modal-editar-reporte-conv");
   try {
     btnGuardar.disabled = true;
     btnGuardar.textContent = "Guardando...";
