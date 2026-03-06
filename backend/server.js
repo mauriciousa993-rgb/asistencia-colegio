@@ -103,8 +103,6 @@ const usuarioSchema = new mongoose.Schema({
   fechaCreacion: { type: Date, default: Date.now }
 });
 
-usuarioSchema.index({ username: 1 });
-
 const Usuario = mongoose.model("Usuario", usuarioSchema);
 
 // Schema de Estudiante (actualizado con datos de padres)
