@@ -1902,6 +1902,10 @@ function setupReportes() {
   document.getElementById("reportes-conv-grupo").addEventListener("change", cargarReportesConvivenciaGestion);
   document.getElementById("reportes-conv-estado-filtro").addEventListener("change", cargarReportesConvivenciaGestion);
   document.getElementById("reportes-conv-fecha-dia").addEventListener("change", cargarReportesConvivenciaGestion);
+  const reportesConvFechaDia = document.getElementById("reportes-conv-fecha-dia");
+  if (reportesConvFechaDia && !reportesConvFechaDia.value) {
+    reportesConvFechaDia.value = obtenerFechaHoy();
+  }
 
   document.getElementById("btn-cerrar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
   document.getElementById("btn-cancelar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
