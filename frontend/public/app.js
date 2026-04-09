@@ -2098,6 +2098,18 @@ function mostrarEstadoAlertasProfesores(mensaje, color = "amber") {
   estado.className = `text-sm mb-2 text-${color}-800`;
 }
 
+function actualizarResumenAlertasProfesores(data = null) {
+  const summary = document.getElementById("reportes-alertas-profesores-summary");
+  if (!summary) return;
+  if (!data) {
+    summary.textContent = "Seguimiento por profesor";
+    return;
+  }
+  const alertas = Number(data.alertasMediodia || 0);
+  const pendientes = Number(data.pendientesMes || 0);
+  summary.textContent = `Seguimiento por profesor (${alertas} alertas, ${pendientes} pendientes)`;
+}
+
 function renderCumplimientoProfesores(items) {
   const contenedor = document.getElementById("reportes-alertas-profesores-lista");
   if (!contenedor) return;
@@ -2109,7 +2121,7 @@ function renderCumplimientoProfesores(items) {
   }
 
   items.forEach((item) => {
-    const card = document.createElement("div");
+    const card = document.createElement("details");
     const claseEstado = item.alertaMediodia
       ? "border-red-300 bg-red-50"
       : (item.faltantes > 0 ? "border-yellow-300 bg-yellow-50" : "border-green-300 bg-green-50");
@@ -2121,15 +2133,20 @@ function renderCumplimientoProfesores(items) {
       ? `Le faltan ${item.faltantes} día(s): ${diasFaltantes || "-"}`
       : "Mes al día.";
 
-    card.className = `border rounded-lg p-3 ${claseEstado}`;
+    card.className = `border rounded-lg ${claseEstado}`;
     card.innerHTML = `
-      <div class="flex flex-wrap items-center justify-between gap-2">
+      <summary class="cursor-pointer select-none p-3 flex flex-wrap items-center justify-between gap-2">
         <p class="font-semibold text-slate-800">${item.nombre || "-"} (${formatearGrado(item.grado)} ${item.grupo || "-"})</p>
-        <span class="text-xs font-bold uppercase px-2 py-1 rounded bg-white border border-slate-300">${etiquetaEstado}</span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-700">Cumplimiento ${item.cumplimientoPorcentaje ?? 0}%</span>
+          <span class="text-xs font-bold uppercase px-2 py-1 rounded bg-white border border-slate-300">${etiquetaEstado}</span>
+        </div>
+      </summary>
+      <div class="px-3 pb-3 pt-1 border-t border-slate-200">
+        <p class="text-sm text-slate-700">Cumplimiento mensual: ${item.cumplimientoPorcentaje ?? 0}% (${item.diasReportados ?? 0}/${item.diasHabilesEsperados ?? 0} días hábiles reportados)</p>
+        <p class="text-sm ${item.alertaMediodia ? "text-red-700 font-semibold" : "text-slate-700"}">${item.mensajeHoy || "Sin novedades para hoy."}</p>
+        <p class="text-sm text-slate-700">${faltantesTexto}</p>
       </div>
-      <p class="text-sm text-slate-700">Cumplimiento mensual: ${item.cumplimientoPorcentaje ?? 0}% (${item.diasReportados ?? 0}/${item.diasHabilesEsperados ?? 0} días hábiles reportados)</p>
-      <p class="text-sm ${item.alertaMediodia ? "text-red-700 font-semibold" : "text-slate-700"}">${item.mensajeHoy || "Sin novedades para hoy."}</p>
-      <p class="text-sm text-slate-700">${faltantesTexto}</p>
     `;
     contenedor.appendChild(card);
   });
@@ -2160,6 +2177,7 @@ async function cargarCumplimientoProfesores() {
 
     cumplimientoProfesoresActual = Array.isArray(data.profesores) ? data.profesores : [];
     renderCumplimientoProfesores(cumplimientoProfesoresActual);
+    actualizarResumenAlertasProfesores(data);
     mostrarEstadoAlertasProfesores(
       `Mes ${data.mes || mes}: ${data.alertasMediodia ?? 0} alerta(s) de mediodía, ${data.pendientesMes ?? 0} profesor(es) con faltantes.`,
       (data.alertasMediodia || 0) > 0 ? "red" : "amber"
@@ -2167,6 +2185,7 @@ async function cargarCumplimientoProfesores() {
   } catch (error) {
     cumplimientoProfesoresActual = [];
     renderCumplimientoProfesores([]);
+    actualizarResumenAlertasProfesores(null);
     mostrarEstadoAlertasProfesores(error.message, "red");
   }
 }
@@ -2186,7 +2205,9 @@ function renderTablaReportesConvivenciaGestion(reportes) {
   const contenedor = document.getElementById("reportes-conv-lista");
   if (!contenedor) return;
   contenedor.innerHTML = "";
+  const fechaMes = document.getElementById("reportes-conv-fecha-mes")?.value || "";
   const fechaDia = document.getElementById("reportes-conv-fecha-dia")?.value || "";
+  const vistaSoloMes = Boolean(fechaMes && !fechaDia);
 
   function normalizarFechaDia(fecha) {
     if (!fecha) return null;
@@ -2210,6 +2231,21 @@ function renderTablaReportesConvivenciaGestion(reportes) {
     const fechaA = a?.fecha ? new Date(a.fecha) : 0;
     const fechaB = b?.fecha ? new Date(b.fecha) : 0;
     return fechaB - fechaA;
+  }
+
+  function compararEstudiantes(a, b) {
+    const nombreA = normalizarTexto(a?.estudianteNombre);
+    const nombreB = normalizarTexto(b?.estudianteNombre);
+    return nombreA.localeCompare(nombreB, "es", { sensitivity: "base" });
+  }
+
+  function obtenerClaveDia(fecha) {
+    const parsed = new Date(fecha);
+    if (Number.isNaN(parsed.getTime())) return "";
+    const anio = parsed.getFullYear();
+    const mes = String(parsed.getMonth() + 1).padStart(2, "0");
+    const dia = String(parsed.getDate()).padStart(2, "0");
+    return `${anio}-${mes}-${dia}`;
   }
 
   if (!reportes.length) {
@@ -2264,43 +2300,15 @@ function renderTablaReportesConvivenciaGestion(reportes) {
 
     const panel = document.createElement("div");
     panel.className = "p-3 border-t border-slate-200 bg-white";
-    panel.innerHTML = `
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50">
-            <tr>
-              <th class="px-4 py-2 text-left">Fecha</th>
-              <th class="px-4 py-2 text-left">Estudiante</th>
-              <th class="px-4 py-2 text-left">Tipo</th>
-              <th class="px-4 py-2 text-left">Observacion</th>
-              <th class="px-4 py-2 text-left">Registrado por</th>
-              <th class="px-4 py-2 text-left">Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="reportes-salon-${grado}-${grupo}"></tbody>
-        </table>
-      </div>
-    `;
     detalle.appendChild(panel);
     contenedor.appendChild(detalle);
 
-    const tbodySalon = panel.querySelector(`#reportes-salon-${grado}-${grupo}`);
     const totalSalon = panel.parentElement.querySelector(`#reportes-salon-total-${grado}-${grupo}`);
-    function renderTablaSalonConFiltro() {
-      const filtrados = [...registrosSalon];
 
-      totalSalon.textContent = `(${filtrados.length} registro(s))`;
-      if (!filtrados.length) {
-        tbodySalon.innerHTML = "<tr><td colspan='6' class='px-4 py-4 text-center text-slate-500'>No hay registros para la fecha seleccionada.</td></tr>";
-        return;
-      }
-
-      tbodySalon.innerHTML = "";
-      filtrados.forEach((r) => {
-        const tr = document.createElement("tr");
-        tr.className = "border-b hover:bg-slate-50";
-        tr.innerHTML = `
-          <td class="px-4 py-2">${r.fecha ? new Date(r.fecha).toLocaleDateString() : "-"}</td>
+    function construirFilasTabla(registros, ocultarFecha = false) {
+      return registros.map((r) => `
+        <tr class="border-b hover:bg-slate-50">
+          ${ocultarFecha ? "" : `<td class="px-4 py-2">${r.fecha ? new Date(r.fecha).toLocaleDateString() : "-"}</td>`}
           <td class="px-4 py-2">${r.estudianteNombre || "-"}</td>
           <td class="px-4 py-2">${formatearTipoAsistencia(r.tipo)}</td>
           <td class="px-4 py-2">${r.observacion || "-"}</td>
@@ -2313,9 +2321,82 @@ function renderTablaReportesConvivenciaGestion(reportes) {
               <i class="fas fa-trash"></i>
             </button>
           </td>
+        </tr>
+      `).join("");
+    }
+
+    function renderTablaSalonConFiltro() {
+      const filtrados = [...registrosSalon];
+
+      totalSalon.textContent = `(${filtrados.length} registro(s))`;
+      if (!filtrados.length) {
+        panel.innerHTML = "<div class='text-sm text-slate-500 text-center py-4'>No hay registros para la fecha seleccionada.</div>";
+        return;
+      }
+
+      if (!vistaSoloMes) {
+        panel.innerHTML = `
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th class="px-4 py-2 text-left">Fecha</th>
+                  <th class="px-4 py-2 text-left">Estudiante</th>
+                  <th class="px-4 py-2 text-left">Tipo</th>
+                  <th class="px-4 py-2 text-left">Observacion</th>
+                  <th class="px-4 py-2 text-left">Registrado por</th>
+                  <th class="px-4 py-2 text-left">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>${construirFilasTabla(filtrados, false)}</tbody>
+            </table>
+          </div>
         `;
-        tbodySalon.appendChild(tr);
+        return;
+      }
+
+      const registrosPorDia = {};
+      filtrados.forEach((r) => {
+        const clave = obtenerClaveDia(r.fecha);
+        if (!clave) return;
+        if (!registrosPorDia[clave]) registrosPorDia[clave] = [];
+        registrosPorDia[clave].push(r);
       });
+      const dias = Object.keys(registrosPorDia).sort((a, b) => new Date(a) - new Date(b));
+      panel.innerHTML = "";
+
+      dias.forEach((dia) => {
+        const registrosDia = (registrosPorDia[dia] || []).slice().sort((a, b) => compararEstudiantes(a, b));
+        const bloqueDia = document.createElement("details");
+        bloqueDia.className = "border border-slate-200 rounded-lg overflow-hidden mb-2";
+        bloqueDia.open = true;
+        const fechaTitulo = new Date(`${dia}T00:00:00`).toLocaleDateString();
+        bloqueDia.innerHTML = `
+          <summary class="cursor-pointer select-none bg-slate-50 px-4 py-2 font-medium text-slate-800 flex justify-between gap-2">
+            <span>${fechaTitulo}</span>
+            <span class="text-sm text-slate-600">${registrosDia.length} registro(s)</span>
+          </summary>
+          <div class="p-2 border-t border-slate-200 bg-white overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th class="px-4 py-2 text-left">Estudiante</th>
+                  <th class="px-4 py-2 text-left">Tipo</th>
+                  <th class="px-4 py-2 text-left">Observacion</th>
+                  <th class="px-4 py-2 text-left">Registrado por</th>
+                  <th class="px-4 py-2 text-left">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>${construirFilasTabla(registrosDia, true)}</tbody>
+            </table>
+          </div>
+        `;
+        panel.appendChild(bloqueDia);
+      });
+
+      if (!dias.length) {
+        panel.innerHTML = "<div class='text-sm text-slate-500 text-center py-4'>No hay registros válidos para agrupar por día.</div>";
+      }
     }
 
     renderTablaSalonConFiltro();

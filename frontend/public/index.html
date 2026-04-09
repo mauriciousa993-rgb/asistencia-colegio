@@ -852,16 +852,20 @@
                 class="w-full border border-slate-300 rounded-lg px-4 py-2">
             </div>
             <p id="reportes-conv-estado" class="text-sm mb-3"></p>
-            <div id="reportes-alertas-profesores" class="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-4">
-              <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-                <h3 class="font-semibold text-amber-900">Seguimiento por profesor</h3>
-                <button id="btn-cargar-alertas-profesores" class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700">
-                  Actualizar Estado
-                </button>
+            <details id="reportes-alertas-profesores" class="mb-4 border border-amber-200 bg-amber-50 rounded-lg overflow-hidden">
+              <summary id="reportes-alertas-profesores-summary" class="cursor-pointer select-none px-4 py-3 font-semibold text-amber-900 bg-amber-100 hover:bg-amber-200">
+                Seguimiento por profesor
+              </summary>
+              <div class="p-4 border-t border-amber-200">
+                <div class="flex justify-end mb-3">
+                  <button id="btn-cargar-alertas-profesores" class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700">
+                    Actualizar Estado
+                  </button>
+                </div>
+                <p id="reportes-alertas-profesores-estado" class="text-sm text-amber-800 mb-2"></p>
+                <div id="reportes-alertas-profesores-lista" class="space-y-2"></div>
               </div>
-              <p id="reportes-alertas-profesores-estado" class="text-sm text-amber-800 mb-2"></p>
-              <div id="reportes-alertas-profesores-lista" class="space-y-2"></div>
-            </div>
+            </details>
             <div id="reportes-conv-lista" class="space-y-3 max-h-[60vh] overflow-y-auto">
               <!-- Sección renderizada por salón -->
             </div>
