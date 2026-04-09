@@ -2369,7 +2369,7 @@ function renderTablaReportesConvivenciaGestion(reportes) {
         const registrosDia = (registrosPorDia[dia] || []).slice().sort((a, b) => compararEstudiantes(a, b));
         const bloqueDia = document.createElement("details");
         bloqueDia.className = "border border-slate-200 rounded-lg overflow-hidden mb-2";
-        bloqueDia.open = true;
+        bloqueDia.open = false;
         const fechaTitulo = new Date(`${dia}T00:00:00`).toLocaleDateString();
         bloqueDia.innerHTML = `
           <summary class="cursor-pointer select-none bg-slate-50 px-4 py-2 font-medium text-slate-800 flex justify-between gap-2">
