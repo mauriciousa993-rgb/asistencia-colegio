@@ -24,6 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "secreto_super_seguro_2024";
+const SCHOOL_HOLIDAYS = process.env.SCHOOL_HOLIDAYS || "";
 const MONGODB_SERVER_SELECTION_TIMEOUT_MS = Number(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS || 10000);
 const STARTUP_STUDENT_BACKUP = process.env.STARTUP_STUDENT_BACKUP === "true";
 
@@ -195,6 +196,81 @@ function getDateKey(value) {
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getMonthKey(value = new Date()) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function parseMonthRange(monthText) {
+  const normalized = String(monthText || "").trim();
+  const valid = /^\d{4}-\d{2}$/.test(normalized) ? normalized : getMonthKey(new Date());
+  const [yearText, monthTextSafe] = valid.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthTextSafe) - 1;
+  const start = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
+  return { monthKey: valid, start, end };
+}
+
+function listBusinessDayKeys(startDate, endDate, holidayConfig = null) {
+  if (!startDate || !endDate || endDate < startDate) return [];
+
+  const keys = [];
+  const current = new Date(Date.UTC(
+    startDate.getUTCFullYear(),
+    startDate.getUTCMonth(),
+    startDate.getUTCDate(),
+    0, 0, 0, 0
+  ));
+  const endKeyDate = new Date(Date.UTC(
+    endDate.getUTCFullYear(),
+    endDate.getUTCMonth(),
+    endDate.getUTCDate(),
+    0, 0, 0, 0
+  ));
+
+  while (current <= endKeyDate) {
+    const day = current.getUTCDay();
+    const isBusinessDay = day >= 1 && day <= 5;
+    const dayKey = getDateKey(current);
+    const isHoliday = isHolidayDay(dayKey, holidayConfig);
+    if (isBusinessDay && !isHoliday) {
+      keys.push(dayKey);
+    }
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+  return keys;
+}
+
+function parseHolidayConfig(rawValue = "") {
+  const exactDates = new Set();
+  const recurringMonthDays = new Set();
+  String(rawValue || "")
+    .split(/[\s,;]+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .forEach((token) => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(token)) {
+        exactDates.add(token);
+        return;
+      }
+      if (/^\d{2}-\d{2}$/.test(token)) {
+        recurringMonthDays.add(token);
+      }
+    });
+  return { exactDates, recurringMonthDays };
+}
+
+function isHolidayDay(dateKey, holidayConfig) {
+  if (!dateKey || !holidayConfig) return false;
+  if (holidayConfig.exactDates?.has(dateKey)) return true;
+  const monthDay = dateKey.slice(5);
+  return holidayConfig.recurringMonthDays?.has(monthDay);
 }
 
 function hasDuplicateConvivenciaReport(estudiante, candidate, excludeReportId = "") {
@@ -923,6 +999,171 @@ app.get("/api/asistencia/registros", autenticarToken, async (req, res) => {
     return res.json(lista);
   } catch (error) {
     return res.status(500).json({ error: "Error al obtener lista de registros de asistencia" });
+  }
+});
+
+app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, res) => {
+  try {
+    if (req.user.rol !== "admin") {
+      return res.status(403).json({ error: "Solo administradores pueden consultar este reporte." });
+    }
+
+    const { mes, horaCorte, festivos } = req.query;
+    const { monthKey, start, end } = parseMonthRange(mes);
+    const ahora = new Date();
+    const esMesActual = monthKey === getMonthKey(ahora);
+    const fechaCorteMes = esMesActual && ahora < end ? ahora : end;
+    const holidayConfig = parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`);
+
+    const [horaRaw = "12", minutoRaw = "00"] = String(horaCorte || "12:00").split(":");
+    const horaValida = Number(horaRaw);
+    const minutoValido = Number(minutoRaw);
+    const horaCorteMinutos = (
+      Number.isFinite(horaValida) && horaValida >= 0 && horaValida <= 23 ? horaValida : 12
+    ) * 60 + (
+      Number.isFinite(minutoValido) && minutoValido >= 0 && minutoValido <= 59 ? minutoValido : 0
+    );
+
+    const profesores = await Usuario.find({ rol: "profesor" })
+      .select("nombre username gradoAsignado grupoAsignado")
+      .lean();
+
+    const profesoresValidos = profesores
+      .map((profesor) => ({
+        ...profesor,
+        gradoAsignado: normalizeGrade(profesor.gradoAsignado),
+        grupoAsignado: normalizeGroup(profesor.grupoAsignado)
+      }))
+      .filter((profesor) => profesor.gradoAsignado && profesor.grupoAsignado);
+
+    if (!profesoresValidos.length) {
+      const hoyEsFestivo = isHolidayDay(getDateKey(ahora), holidayConfig);
+      return res.json({
+        mes: monthKey,
+        fechaInicio: start,
+        fechaFin: end,
+        fechaCorteEvaluada: fechaCorteMes,
+        horaCorte: `${String(Math.floor(horaCorteMinutos / 60)).padStart(2, "0")}:${String(horaCorteMinutos % 60).padStart(2, "0")}`,
+        hoyEsFestivo,
+        festivosConfigurados: holidayConfig.exactDates.size + holidayConfig.recurringMonthDays.size,
+        totalProfesores: 0,
+        alertasMediodia: 0,
+        pendientesMes: 0,
+        profesores: []
+      });
+    }
+
+    const salonesUnicos = Array.from(new Set(
+      profesoresValidos.map((profesor) => `${profesor.gradoAsignado}|${profesor.grupoAsignado}`)
+    ))
+      .map((llave) => {
+        const [grado, grupo] = llave.split("|");
+        return { grado, grupo };
+      });
+
+    const estudiantes = await Estudiante.find({
+      $or: salonesUnicos.map((salon) => ({ grado: salon.grado, grupo: salon.grupo }))
+    }).select("grado grupo historial");
+
+    const diasConRegistroPorSalon = {};
+    salonesUnicos.forEach((salon) => {
+      diasConRegistroPorSalon[`${salon.grado}|${salon.grupo}`] = new Set();
+    });
+
+    estudiantes.forEach((estudiante) => {
+      const grado = normalizeGrade(estudiante.grado);
+      const grupo = normalizeGroup(estudiante.grupo);
+      const llaveSalon = `${grado}|${grupo}`;
+      const diasRegistrados = diasConRegistroPorSalon[llaveSalon];
+      if (!diasRegistrados) return;
+
+      (estudiante.historial || []).forEach((registro) => {
+        const fechaRegistro = new Date(registro.fecha);
+        if (Number.isNaN(fechaRegistro.getTime())) return;
+        if (fechaRegistro < start || fechaRegistro > fechaCorteMes) return;
+        const key = getDateKey(fechaRegistro);
+        if (key) diasRegistrados.add(key);
+      });
+    });
+
+    const diasHabilesEsperados = listBusinessDayKeys(start, fechaCorteMes, holidayConfig);
+    const hoyKey = getDateKey(ahora);
+    const hoyEsHabil = [1, 2, 3, 4, 5].includes(ahora.getUTCDay());
+    const hoyEsFestivo = isHolidayDay(hoyKey, holidayConfig);
+    const minutosActuales = (ahora.getUTCHours() * 60) + ahora.getUTCMinutes();
+
+    const items = profesoresValidos.map((profesor) => {
+      const llaveSalon = `${profesor.gradoAsignado}|${profesor.grupoAsignado}`;
+      const diasRegistrados = diasConRegistroPorSalon[llaveSalon] || new Set();
+      const diasFaltantes = diasHabilesEsperados.filter((dia) => !diasRegistrados.has(dia));
+      const tieneRegistroHoy = diasRegistrados.has(hoyKey);
+      const alertaMediodia = esMesActual && hoyEsHabil && !hoyEsFestivo && !tieneRegistroHoy && minutosActuales >= horaCorteMinutos;
+
+      let estadoHoy = "sin_alerta";
+      let mensajeHoy = "No aplica alerta para hoy.";
+      if (esMesActual && hoyEsHabil && !hoyEsFestivo) {
+        if (tieneRegistroHoy) {
+          estadoHoy = "al_dia_hoy";
+          mensajeHoy = "Ya registró asistencia del día.";
+        } else if (minutosActuales >= horaCorteMinutos) {
+          estadoHoy = "alerta_mediodia";
+          mensajeHoy = "No registró asistencia antes de mediodía.";
+        } else {
+          estadoHoy = "pendiente_antes_de_corte";
+          mensajeHoy = "Aún no registra hoy; sigue dentro del horario límite.";
+        }
+      } else if (esMesActual && hoyEsFestivo) {
+        estadoHoy = "festivo";
+        mensajeHoy = "Hoy es festivo; no se genera alerta.";
+      }
+
+      const cumplimiento = diasHabilesEsperados.length
+        ? Math.round((diasRegistrados.size / diasHabilesEsperados.length) * 100)
+        : 100;
+
+      return {
+        profesorId: profesor._id,
+        nombre: profesor.nombre,
+        username: profesor.username,
+        grado: profesor.gradoAsignado,
+        grupo: profesor.grupoAsignado,
+        mes: monthKey,
+        diasHabilesEsperados: diasHabilesEsperados.length,
+        diasReportados: diasRegistrados.size,
+        diasFaltantes,
+        faltantes: diasFaltantes.length,
+        cumplimientoPorcentaje: cumplimiento,
+        estadoMensual: diasFaltantes.length ? "incompleto" : "al_dia",
+        estadoHoy,
+        alertaMediodia,
+        mensajeHoy
+      };
+    });
+
+    items.sort((a, b) => {
+      if (a.alertaMediodia !== b.alertaMediodia) return a.alertaMediodia ? -1 : 1;
+      if (a.faltantes !== b.faltantes) return b.faltantes - a.faltantes;
+      return a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" });
+    });
+
+    const alertasMediodia = items.filter((item) => item.alertaMediodia).length;
+    const pendientesMes = items.filter((item) => item.faltantes > 0).length;
+
+    return res.json({
+      mes: monthKey,
+      fechaInicio: start,
+      fechaFin: end,
+      fechaCorteEvaluada: fechaCorteMes,
+      horaCorte: `${String(Math.floor(horaCorteMinutos / 60)).padStart(2, "0")}:${String(horaCorteMinutos % 60).padStart(2, "0")}`,
+      hoyEsFestivo,
+      festivosConfigurados: holidayConfig.exactDates.size + holidayConfig.recurringMonthDays.size,
+      totalProfesores: items.length,
+      alertasMediodia,
+      pendientesMes,
+      profesores: items
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Error al generar cumplimiento mensual por profesor." });
   }
 });
 

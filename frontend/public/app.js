@@ -17,6 +17,7 @@ let reportesConvivenciaActuales = [];
 let usuariosSistema = [];
 let usuarioEditandoId = "";
 let registrosAsistenciaGestion = [];
+let cumplimientoProfesoresActual = [];
 let registroAsistenciaEditando = { registroId: "", estudianteId: "" };
 let toastTimeoutId = null;
 
@@ -372,6 +373,7 @@ function cambiarVista(vista) {
     cargarEstadisticas();
     cargarReporteGrupo();
     cargarReportesConvivenciaGestion();
+    cargarCumplimientoProfesores();
   } else if (vista === "usuarios") {
     cargarUsuarios();
   }
@@ -777,6 +779,28 @@ function obtenerFechaHoy() {
   const mes = String(ahora.getMonth() + 1).padStart(2, "0");
   const dia = String(ahora.getDate()).padStart(2, "0");
   return `${anio}-${mes}-${dia}`;
+}
+
+function obtenerMesActual() {
+  const hoy = obtenerFechaHoy();
+  return hoy.slice(0, 7);
+}
+
+function obtenerRangoMes(mesTexto) {
+  const valor = String(mesTexto || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(valor)) {
+    return null;
+  }
+  const [anioTexto, mesTextoSeguro] = valor.split("-");
+  const anio = Number(anioTexto);
+  const mes = Number(mesTextoSeguro);
+  if (!Number.isFinite(anio) || !Number.isFinite(mes) || mes < 1 || mes > 12) {
+    return null;
+  }
+  const inicio = `${valor}-01`;
+  const ultimoDia = new Date(anio, mes, 0).getDate();
+  const fin = `${valor}-${String(ultimoDia).padStart(2, "0")}`;
+  return { inicio, fin };
 }
 
 function construirFechaAsistenciaISO(fecha) {
@@ -2030,10 +2054,29 @@ function setupReportes() {
   document.getElementById("reportes-conv-grado").addEventListener("change", cargarReportesConvivenciaGestion);
   document.getElementById("reportes-conv-grupo").addEventListener("change", cargarReportesConvivenciaGestion);
   document.getElementById("reportes-conv-estado-filtro").addEventListener("change", cargarReportesConvivenciaGestion);
-  document.getElementById("reportes-conv-fecha-dia").addEventListener("change", cargarReportesConvivenciaGestion);
-  const reportesConvFechaDia = document.getElementById("reportes-conv-fecha-dia");
-  if (reportesConvFechaDia && !reportesConvFechaDia.value) {
-    reportesConvFechaDia.value = obtenerFechaHoy();
+  document.getElementById("reportes-conv-fecha-mes").addEventListener("change", () => {
+    const fechaDiaInput = document.getElementById("reportes-conv-fecha-dia");
+    if (fechaDiaInput) fechaDiaInput.value = "";
+    cargarReportesConvivenciaGestion();
+    if (usuarioActual?.rol === "admin") {
+      cargarCumplimientoProfesores();
+    }
+  });
+  document.getElementById("reportes-conv-fecha-dia").addEventListener("change", () => {
+    const fechaDia = document.getElementById("reportes-conv-fecha-dia")?.value || "";
+    const mesInput = document.getElementById("reportes-conv-fecha-mes");
+    if (mesInput && fechaDia) {
+      mesInput.value = fechaDia.slice(0, 7);
+    }
+    cargarReportesConvivenciaGestion();
+    if (usuarioActual?.rol === "admin") {
+      cargarCumplimientoProfesores();
+    }
+  });
+  document.getElementById("btn-cargar-alertas-profesores").addEventListener("click", cargarCumplimientoProfesores);
+  const reportesConvFechaMes = document.getElementById("reportes-conv-fecha-mes");
+  if (reportesConvFechaMes && !reportesConvFechaMes.value) {
+    reportesConvFechaMes.value = obtenerMesActual();
   }
 
   document.getElementById("btn-cerrar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
@@ -2046,6 +2089,86 @@ function mostrarEstadoReportesConvivenciaGestion(mensaje, color = "slate") {
   if (!estado) return;
   estado.textContent = mensaje;
   estado.className = `text-sm mb-3 text-${color}-600`;
+}
+
+function mostrarEstadoAlertasProfesores(mensaje, color = "amber") {
+  const estado = document.getElementById("reportes-alertas-profesores-estado");
+  if (!estado) return;
+  estado.textContent = mensaje;
+  estado.className = `text-sm mb-2 text-${color}-800`;
+}
+
+function renderCumplimientoProfesores(items) {
+  const contenedor = document.getElementById("reportes-alertas-profesores-lista");
+  if (!contenedor) return;
+  contenedor.innerHTML = "";
+
+  if (!Array.isArray(items) || !items.length) {
+    contenedor.innerHTML = "<div class='text-sm text-amber-800'>No hay profesores asignados para mostrar.</div>";
+    return;
+  }
+
+  items.forEach((item) => {
+    const card = document.createElement("div");
+    const claseEstado = item.alertaMediodia
+      ? "border-red-300 bg-red-50"
+      : (item.faltantes > 0 ? "border-yellow-300 bg-yellow-50" : "border-green-300 bg-green-50");
+    const etiquetaEstado = item.alertaMediodia
+      ? "ALERTA"
+      : (item.faltantes > 0 ? "Pendiente" : "Al dia");
+    const diasFaltantes = (item.diasFaltantes || []).join(", ");
+    const faltantesTexto = item.faltantes > 0
+      ? `Le faltan ${item.faltantes} día(s): ${diasFaltantes || "-"}`
+      : "Mes al día.";
+
+    card.className = `border rounded-lg p-3 ${claseEstado}`;
+    card.innerHTML = `
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="font-semibold text-slate-800">${item.nombre || "-"} (${formatearGrado(item.grado)} ${item.grupo || "-"})</p>
+        <span class="text-xs font-bold uppercase px-2 py-1 rounded bg-white border border-slate-300">${etiquetaEstado}</span>
+      </div>
+      <p class="text-sm text-slate-700">Cumplimiento mensual: ${item.cumplimientoPorcentaje ?? 0}% (${item.diasReportados ?? 0}/${item.diasHabilesEsperados ?? 0} días hábiles reportados)</p>
+      <p class="text-sm ${item.alertaMediodia ? "text-red-700 font-semibold" : "text-slate-700"}">${item.mensajeHoy || "Sin novedades para hoy."}</p>
+      <p class="text-sm text-slate-700">${faltantesTexto}</p>
+    `;
+    contenedor.appendChild(card);
+  });
+}
+
+async function cargarCumplimientoProfesores() {
+  const bloque = document.getElementById("reportes-alertas-profesores");
+  if (!bloque) return;
+
+  if (usuarioActual?.rol !== "admin") {
+    bloque.classList.add("hidden");
+    return;
+  }
+  bloque.classList.remove("hidden");
+
+  try {
+    const mes = document.getElementById("reportes-conv-fecha-mes")?.value || obtenerMesActual();
+    const params = new URLSearchParams();
+    if (mes) params.append("mes", mes);
+
+    const response = await fetch(`${API_URL}/asistencia/cumplimiento-profesores?${params.toString()}`, {
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo cargar el estado por profesor.");
+    }
+
+    cumplimientoProfesoresActual = Array.isArray(data.profesores) ? data.profesores : [];
+    renderCumplimientoProfesores(cumplimientoProfesoresActual);
+    mostrarEstadoAlertasProfesores(
+      `Mes ${data.mes || mes}: ${data.alertasMediodia ?? 0} alerta(s) de mediodía, ${data.pendientesMes ?? 0} profesor(es) con faltantes.`,
+      (data.alertasMediodia || 0) > 0 ? "red" : "amber"
+    );
+  } catch (error) {
+    cumplimientoProfesoresActual = [];
+    renderCumplimientoProfesores([]);
+    mostrarEstadoAlertasProfesores(error.message, "red");
+  }
 }
 
 function abrirModalEditarReporteConvivenciaGestion() {
@@ -2205,6 +2328,7 @@ async function cargarReportesConvivenciaGestion() {
     const grado = document.getElementById("reportes-conv-grado").value;
     const grupo = document.getElementById("reportes-conv-grupo").value;
     const tipo = document.getElementById("reportes-conv-estado-filtro").value;
+    const fechaMes = document.getElementById("reportes-conv-fecha-mes").value;
     const fechaDia = document.getElementById("reportes-conv-fecha-dia").value;
     const busqueda = document.getElementById("reportes-conv-busqueda").value.trim();
 
@@ -2214,6 +2338,12 @@ async function cargarReportesConvivenciaGestion() {
     if (fechaDia) {
       params.append("fechaDesde", fechaDia);
       params.append("fechaHasta", fechaDia);
+    } else if (fechaMes) {
+      const rangoMes = obtenerRangoMes(fechaMes);
+      if (rangoMes) {
+        params.append("fechaDesde", rangoMes.inicio);
+        params.append("fechaHasta", rangoMes.fin);
+      }
     }
     if (busqueda) params.append("busqueda", busqueda);
 

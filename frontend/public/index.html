@@ -817,7 +817,7 @@
           <!-- Gestion de Registros de Asistencia -->
           <div class="bg-white rounded-xl shadow p-6">
             <h2 class="text-xl font-semibold mb-4">Lista de Registros de Asistencia</h2>
-            <div class="grid md:grid-cols-5 gap-3 mb-4">
+            <div class="grid md:grid-cols-6 gap-3 mb-4">
               <select id="reportes-conv-grado" class="border border-slate-300 rounded-lg px-4 py-2">
                 <option value="">Todos los grados</option>
                 <option value="6">6&deg;</option>
@@ -841,6 +841,7 @@
                 <option value="retardo">Retardo</option>
                 <option value="salida">Permiso</option>
               </select>
+              <input id="reportes-conv-fecha-mes" type="month" class="border border-slate-300 rounded-lg px-4 py-2" placeholder="Mes">
               <input id="reportes-conv-fecha-dia" type="date" class="border border-slate-300 rounded-lg px-4 py-2" placeholder="Día">
               <button id="btn-cargar-reportes-conv" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
                 Cargar Lista
@@ -851,6 +852,16 @@
                 class="w-full border border-slate-300 rounded-lg px-4 py-2">
             </div>
             <p id="reportes-conv-estado" class="text-sm mb-3"></p>
+            <div id="reportes-alertas-profesores" class="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-4">
+              <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <h3 class="font-semibold text-amber-900">Seguimiento por profesor</h3>
+                <button id="btn-cargar-alertas-profesores" class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700">
+                  Actualizar Estado
+                </button>
+              </div>
+              <p id="reportes-alertas-profesores-estado" class="text-sm text-amber-800 mb-2"></p>
+              <div id="reportes-alertas-profesores-lista" class="space-y-2"></div>
+            </div>
             <div id="reportes-conv-lista" class="space-y-3 max-h-[60vh] overflow-y-auto">
               <!-- Sección renderizada por salón -->
             </div>
