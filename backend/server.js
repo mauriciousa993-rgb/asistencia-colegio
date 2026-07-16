@@ -247,6 +247,33 @@ function listBusinessDayKeys(startDate, endDate, holidayConfig = null) {
   return keys;
 }
 
+function listHolidayDayKeys(startDate, endDate, holidayConfig = null) {
+  if (!startDate || !endDate || endDate < startDate) return [];
+
+  const keys = [];
+  const current = new Date(Date.UTC(
+    startDate.getUTCFullYear(),
+    startDate.getUTCMonth(),
+    startDate.getUTCDate(),
+    0, 0, 0, 0
+  ));
+  const endKeyDate = new Date(Date.UTC(
+    endDate.getUTCFullYear(),
+    endDate.getUTCMonth(),
+    endDate.getUTCDate(),
+    0, 0, 0, 0
+  ));
+
+  while (current <= endKeyDate) {
+    const dayKey = getDateKey(current);
+    if (isHolidayDay(dayKey, holidayConfig)) {
+      keys.push(dayKey);
+    }
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+  return keys;
+}
+
 function parseHolidayConfig(rawValue = "") {
   const exactDates = new Set();
   const recurringMonthDays = new Set();
@@ -1014,6 +1041,7 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
     const esMesActual = monthKey === getMonthKey(ahora);
     const fechaCorteMes = esMesActual && ahora < end ? ahora : end;
     const holidayConfig = parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`);
+    const festivosDelMes = listHolidayDayKeys(start, end, holidayConfig);
 
     const [horaRaw = "12", minutoRaw = "00"] = String(horaCorte || "12:00").split(":");
     const horaValida = Number(horaRaw);
@@ -1046,6 +1074,7 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
         horaCorte: `${String(Math.floor(horaCorteMinutos / 60)).padStart(2, "0")}:${String(horaCorteMinutos % 60).padStart(2, "0")}`,
         hoyEsFestivo,
         festivosConfigurados: holidayConfig.exactDates.size + holidayConfig.recurringMonthDays.size,
+        festivosDelMes,
         totalProfesores: 0,
         alertasMediodia: 0,
         pendientesMes: 0,

@@ -18,6 +18,7 @@ let usuariosSistema = [];
 let usuarioEditandoId = "";
 let registrosAsistenciaGestion = [];
 let cumplimientoProfesoresActual = [];
+let cumplimientoContextActual = null;
 let registroAsistenciaEditando = { registroId: "", estudianteId: "" };
 let toastTimeoutId = null;
 
@@ -2079,6 +2080,7 @@ function setupReportes() {
     reportesConvFechaMes.value = obtenerMesActual();
   }
 
+  document.getElementById("btn-cerrar-modal-calendario-asistencia").addEventListener("click", cerrarModalCalendarioAsistencia);
   document.getElementById("btn-cerrar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
   document.getElementById("btn-cancelar-modal-editar-reporte-conv").addEventListener("click", cerrarModalEditarReporteConvivenciaGestion);
   document.getElementById("form-editar-reporte-conv").addEventListener("submit", guardarEdicionReporteConvivenciaGestion);
@@ -2146,9 +2148,15 @@ function renderCumplimientoProfesores(items) {
         <p class="text-sm text-slate-700">Cumplimiento mensual: ${item.cumplimientoPorcentaje ?? 0}% (${item.diasReportados ?? 0}/${item.diasHabilesEsperados ?? 0} días hábiles reportados)</p>
         <p class="text-sm ${item.alertaMediodia ? "text-red-700 font-semibold" : "text-slate-700"}">${item.mensajeHoy || "Sin novedades para hoy."}</p>
         <p class="text-sm text-slate-700">${faltantesTexto}</p>
+        <button type="button" data-profesor-id="${item.profesorId}" class="btn-ver-calendario-profesor mt-2 text-xs bg-slate-700 text-white px-3 py-1.5 rounded-lg hover:bg-slate-800">
+          <i class="fas fa-calendar-days"></i> Ver calendario
+        </button>
       </div>
     `;
     contenedor.appendChild(card);
+    card.querySelector(".btn-ver-calendario-profesor").addEventListener("click", () => {
+      abrirCalendarioProfesor(item.profesorId);
+    });
   });
 }
 
@@ -2176,6 +2184,11 @@ async function cargarCumplimientoProfesores() {
     }
 
     cumplimientoProfesoresActual = Array.isArray(data.profesores) ? data.profesores : [];
+    cumplimientoContextActual = {
+      mes: data.mes || mes,
+      fechaCorteEvaluada: data.fechaCorteEvaluada || null,
+      festivosDelMes: Array.isArray(data.festivosDelMes) ? data.festivosDelMes : []
+    };
     renderCumplimientoProfesores(cumplimientoProfesoresActual);
     actualizarResumenAlertasProfesores(data);
     mostrarEstadoAlertasProfesores(
@@ -2188,6 +2201,90 @@ async function cargarCumplimientoProfesores() {
     actualizarResumenAlertasProfesores(null);
     mostrarEstadoAlertasProfesores(error.message, "red");
   }
+}
+
+const MESES_NOMBRES_CALENDARIO = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+];
+
+function construirCalendarioMensualHTML(item, contexto) {
+  const monthKey = contexto?.mes || obtenerMesActual();
+  const [anioTexto, mesTexto] = monthKey.split("-");
+  const anio = Number(anioTexto);
+  const mesIndice = Number(mesTexto) - 1;
+  if (!Number.isFinite(anio) || !Number.isFinite(mesIndice)) {
+    return "<p class='text-sm text-slate-500'>No se pudo determinar el mes a mostrar.</p>";
+  }
+
+  const diasFaltantes = new Set(item.diasFaltantes || []);
+  const festivos = new Set(contexto?.festivosDelMes || []);
+  const fechaCorte = contexto?.fechaCorteEvaluada ? new Date(contexto.fechaCorteEvaluada) : new Date();
+  const fechaCorteKey = getDateKeyLocal(fechaCorte);
+  const totalDias = new Date(anio, mesIndice + 1, 0).getDate();
+
+  const nombresColumnas = ["L", "M", "X", "J", "V", "S", "D"];
+  let celdas = "";
+
+  const primerDiaSemana = new Date(anio, mesIndice, 1).getDay();
+  const offsetLunes = (primerDiaSemana + 6) % 7;
+  for (let i = 0; i < offsetLunes; i++) {
+    celdas += `<div></div>`;
+  }
+
+  for (let dia = 1; dia <= totalDias; dia++) {
+    const dateKey = `${anioTexto}-${mesTexto.padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+    const diaSemana = new Date(anio, mesIndice, dia).getDay();
+    const esFinDeSemana = diaSemana === 0 || diaSemana === 6;
+
+    let clase = "bg-white border border-slate-200 text-slate-500";
+    if (festivos.has(dateKey)) {
+      clase = "bg-amber-300 text-amber-900";
+    } else if (esFinDeSemana) {
+      clase = "bg-slate-200 text-slate-500";
+    } else if (dateKey > fechaCorteKey) {
+      clase = "bg-white border border-slate-200 text-slate-500";
+    } else if (diasFaltantes.has(dateKey)) {
+      clase = "bg-red-500 text-white";
+    } else {
+      clase = "bg-green-500 text-white";
+    }
+
+    celdas += `<div class="aspect-square flex items-center justify-center rounded text-sm font-medium ${clase}">${dia}</div>`;
+  }
+
+  return `
+    <p class="text-sm font-medium text-slate-700 mb-2">${item.nombre || "-"} · ${formatearGrado(item.grado)} ${item.grupo || "-"} · ${MESES_NOMBRES_CALENDARIO[mesIndice]} ${anio}</p>
+    <div class="grid grid-cols-7 gap-1 text-xs font-semibold text-slate-500 mb-1">
+      ${nombresColumnas.map((n) => `<div class="text-center">${n}</div>`).join("")}
+    </div>
+    <div class="grid grid-cols-7 gap-1">
+      ${celdas}
+    </div>
+  `;
+}
+
+function getDateKeyLocal(fecha) {
+  const anio = fecha.getFullYear();
+  const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+  const dia = String(fecha.getDate()).padStart(2, "0");
+  return `${anio}-${mes}-${dia}`;
+}
+
+function abrirCalendarioProfesor(profesorId) {
+  const item = cumplimientoProfesoresActual.find((p) => String(p.profesorId) === String(profesorId));
+  if (!item) return;
+
+  const titulo = document.getElementById("calendario-asistencia-titulo");
+  const grid = document.getElementById("calendario-asistencia-grid");
+  if (titulo) titulo.textContent = "Calendario de asistencia";
+  if (grid) grid.innerHTML = construirCalendarioMensualHTML(item, cumplimientoContextActual);
+
+  document.getElementById("modal-calendario-asistencia").classList.remove("hidden");
+}
+
+function cerrarModalCalendarioAsistencia() {
+  document.getElementById("modal-calendario-asistencia").classList.add("hidden");
 }
 
 function abrirModalEditarReporteConvivenciaGestion() {
