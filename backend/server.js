@@ -1551,7 +1551,8 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
     const ahora = obtenerAhoraLocal();
     const esMesActual = monthKey === getMonthKey(ahora);
     const finDeHoy = finDelDiaLocal(ahora);
-    const fechaCorteMes = esMesActual && finDeHoy < end ? finDeHoy : end;
+    // Un mes que aun no llega no genera dias faltantes.
+    const fechaCorteMes = finDeHoy < end ? finDeHoy : end;
     const holidayConfig = parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`);
     const festivosDelMes = listHolidayDayKeys(start, end, holidayConfig);
 
@@ -1702,6 +1703,109 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
   }
 });
 
+// Contexto compartido por los calendarios: rango del mes, festivos y hora limite.
+function construirContextoCalendario({ mes, horaCorte, festivos }) {
+  const { monthKey, start, end } = parseMonthRange(mes);
+  const ahora = obtenerAhoraLocal();
+  const esMesActual = monthKey === getMonthKey(ahora);
+  const finDeHoy = finDelDiaLocal(ahora);
+  // Nunca se evalua mas alla de hoy: en un mes futuro ningun dia puede estar "sin subir".
+  const fechaCorteMes = finDeHoy < end ? finDeHoy : end;
+
+  return {
+    monthKey,
+    start,
+    end,
+    esMesActual,
+    hoyKey: getDateKey(ahora),
+    fechaCorteKey: getDateKey(fechaCorteMes),
+    holidayConfig: parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`),
+    horaCorteMinutos: parseHoraCorteMinutos(horaCorte),
+    minutosActuales: (ahora.getUTCHours() * 60) + ahora.getUTCMinutes()
+  };
+}
+
+// Por cada dia del mes: cuantos registros hay y a cuantos estudiantes distintos cubren.
+function agruparRegistrosPorDia(estudiantes, start, end) {
+  const registrosPorDia = new Map();
+  estudiantes.forEach((estudiante) => {
+    (estudiante.historial || []).forEach((registro) => {
+      const fechaRegistro = new Date(registro.fecha);
+      if (Number.isNaN(fechaRegistro.getTime())) return;
+      if (fechaRegistro < start || fechaRegistro > end) return;
+      const dayKey = getDateKey(fechaRegistro);
+      if (!dayKey) return;
+      if (!registrosPorDia.has(dayKey)) {
+        registrosPorDia.set(dayKey, { registros: 0, estudiantes: new Set() });
+      }
+      const detalle = registrosPorDia.get(dayKey);
+      detalle.registros += 1;
+      detalle.estudiantes.add(String(estudiante._id));
+    });
+  });
+  return registrosPorDia;
+}
+
+function construirDiasCalendario(registrosPorDia, contexto) {
+  const { start, holidayConfig, hoyKey, fechaCorteKey, horaCorteMinutos, minutosActuales } = contexto;
+  const totalDias = new Date(Date.UTC(
+    start.getUTCFullYear(),
+    start.getUTCMonth() + 1,
+    0
+  )).getUTCDate();
+
+  const dias = [];
+  for (let numeroDia = 1; numeroDia <= totalDias; numeroDia++) {
+    const fechaDia = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), numeroDia));
+    const dayKey = getDateKey(fechaDia);
+    const diaSemana = fechaDia.getUTCDay();
+    const esFinDeSemana = diaSemana === 0 || diaSemana === 6;
+    const esFestivo = isHolidayDay(dayKey, holidayConfig);
+    const detalle = registrosPorDia.get(dayKey);
+
+    let estado;
+    if (esFestivo) {
+      estado = "festivo";
+    } else if (esFinDeSemana) {
+      estado = "fin_de_semana";
+    } else if (detalle) {
+      estado = "registrado";
+    } else if (dayKey > fechaCorteKey) {
+      estado = "futuro";
+    } else if (dayKey === hoyKey && minutosActuales < horaCorteMinutos) {
+      estado = "pendiente_hoy";
+    } else {
+      estado = "faltante";
+    }
+
+    dias.push({
+      fecha: dayKey,
+      dia: numeroDia,
+      diaSemana,
+      estado,
+      esHoy: dayKey === hoyKey,
+      registros: detalle ? detalle.registros : 0,
+      estudiantesRegistrados: detalle ? detalle.estudiantes.size : 0
+    });
+  }
+  return dias;
+}
+
+function resumirDiasCalendario(dias) {
+  const diasHabiles = dias.filter((dia) => ["registrado", "faltante", "pendiente_hoy"].includes(dia.estado));
+  const diasRegistrados = dias.filter((dia) => dia.estado === "registrado");
+  const diasFaltantes = dias.filter((dia) => dia.estado === "faltante");
+
+  return {
+    diasHabiles: diasHabiles.length,
+    diasRegistrados: diasRegistrados.length,
+    diasFaltantes: diasFaltantes.map((dia) => dia.fecha),
+    cumplimientoPorcentaje: diasHabiles.length
+      ? Math.round((diasRegistrados.length / diasHabiles.length) * 100)
+      : 100
+  };
+}
+
 // Calendario mensual del salon: que dias ya se subio la asistencia y cuales estan pendientes.
 app.get("/api/asistencia/calendario-salon", autenticarToken, async (req, res) => {
   try {
@@ -1726,107 +1830,30 @@ app.get("/api/asistencia/calendario-salon", autenticarToken, async (req, res) =>
       return res.status(400).json({ error: "Debes indicar grado y grupo para ver el calendario." });
     }
 
-    const { monthKey, start, end } = parseMonthRange(mes);
-    const ahora = obtenerAhoraLocal();
-    const hoyKey = getDateKey(ahora);
-    const esMesActual = monthKey === getMonthKey(ahora);
-    const finDeHoy = finDelDiaLocal(ahora);
-    const fechaCorteMes = esMesActual && finDeHoy < end ? finDeHoy : end;
-    const fechaCorteKey = getDateKey(fechaCorteMes);
-
-    const holidayConfig = parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`);
-    const horaCorteMinutos = parseHoraCorteMinutos(horaCorte);
-    const minutosActuales = (ahora.getUTCHours() * 60) + ahora.getUTCMinutes();
+    const contexto = construirContextoCalendario({ mes, horaCorte, festivos });
 
     const estudiantes = await Estudiante.find({ grado: gradoFinal, grupo: grupoFinal })
       .select("historial")
       .lean();
 
-    // Por cada dia: cuantos registros hay y a cuantos estudiantes distintos cubren.
-    const registrosPorDia = new Map();
-    estudiantes.forEach((estudiante) => {
-      (estudiante.historial || []).forEach((registro) => {
-        const fechaRegistro = new Date(registro.fecha);
-        if (Number.isNaN(fechaRegistro.getTime())) return;
-        if (fechaRegistro < start || fechaRegistro > end) return;
-        const dayKey = getDateKey(fechaRegistro);
-        if (!dayKey) return;
-        if (!registrosPorDia.has(dayKey)) {
-          registrosPorDia.set(dayKey, { registros: 0, estudiantes: new Set() });
-        }
-        const detalle = registrosPorDia.get(dayKey);
-        detalle.registros += 1;
-        detalle.estudiantes.add(String(estudiante._id));
-      });
-    });
-
-    const totalDias = new Date(Date.UTC(
-      start.getUTCFullYear(),
-      start.getUTCMonth() + 1,
-      0
-    )).getUTCDate();
-
-    const dias = [];
-    for (let numeroDia = 1; numeroDia <= totalDias; numeroDia++) {
-      const fechaDia = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), numeroDia));
-      const dayKey = getDateKey(fechaDia);
-      const diaSemana = fechaDia.getUTCDay();
-      const esFinDeSemana = diaSemana === 0 || diaSemana === 6;
-      const esFestivo = isHolidayDay(dayKey, holidayConfig);
-      const detalle = registrosPorDia.get(dayKey);
-      const tieneRegistro = Boolean(detalle);
-
-      let estado;
-      if (esFestivo) {
-        estado = "festivo";
-      } else if (esFinDeSemana) {
-        estado = "fin_de_semana";
-      } else if (tieneRegistro) {
-        estado = "registrado";
-      } else if (dayKey > fechaCorteKey) {
-        estado = "futuro";
-      } else if (dayKey === hoyKey && minutosActuales < horaCorteMinutos) {
-        estado = "pendiente_hoy";
-      } else {
-        estado = "faltante";
-      }
-
-      dias.push({
-        fecha: dayKey,
-        dia: numeroDia,
-        diaSemana,
-        estado,
-        esHoy: dayKey === hoyKey,
-        registros: detalle ? detalle.registros : 0,
-        estudiantesRegistrados: detalle ? detalle.estudiantes.size : 0
-      });
-    }
-
-    const diasHabiles = dias.filter((dia) => ["registrado", "faltante", "pendiente_hoy"].includes(dia.estado));
-    const diasRegistrados = dias.filter((dia) => dia.estado === "registrado");
-    const diasFaltantes = dias.filter((dia) => dia.estado === "faltante");
-    const cumplimiento = diasHabiles.length
-      ? Math.round((diasRegistrados.length / diasHabiles.length) * 100)
-      : 100;
-
-    const diaHoy = dias.find((dia) => dia.fecha === hoyKey) || null;
+    const registrosPorDia = agruparRegistrosPorDia(estudiantes, contexto.start, contexto.end);
+    const dias = construirDiasCalendario(registrosPorDia, contexto);
+    const resumen = resumirDiasCalendario(dias);
+    const diaHoy = dias.find((dia) => dia.fecha === contexto.hoyKey) || null;
 
     return res.json({
       grado: gradoFinal,
       grupo: grupoFinal,
-      mes: monthKey,
-      horaCorte: formatearHoraCorte(horaCorteMinutos),
+      mes: contexto.monthKey,
+      horaCorte: formatearHoraCorte(contexto.horaCorteMinutos),
       totalEstudiantes: estudiantes.length,
       dias,
-      diasHabiles: diasHabiles.length,
-      diasRegistrados: diasRegistrados.length,
-      diasFaltantes: diasFaltantes.map((dia) => dia.fecha),
-      cumplimientoPorcentaje: cumplimiento,
-      hoy: esMesActual && diaHoy
+      ...resumen,
+      hoy: contexto.esMesActual && diaHoy
         ? {
           fecha: diaHoy.fecha,
           estado: diaHoy.estado,
-          yaVencioElPlazo: minutosActuales >= horaCorteMinutos,
+          yaVencioElPlazo: contexto.minutosActuales >= contexto.horaCorteMinutos,
           registros: diaHoy.registros,
           estudiantesRegistrados: diaHoy.estudiantesRegistrados
         }
@@ -1835,6 +1862,91 @@ app.get("/api/asistencia/calendario-salon", autenticarToken, async (req, res) =>
   } catch (error) {
     logger.error(`Error al generar calendario del salón: ${error.message}`);
     return res.status(500).json({ error: "Error al generar el calendario del salón" });
+  }
+});
+
+// Tablero mensual: el calendario de todos los salones del colegio en una sola vista.
+app.get("/api/asistencia/calendarios-mes", autenticarToken, async (req, res) => {
+  try {
+    if (!esAdmin(req, res)) return;
+
+    const { mes, horaCorte, festivos } = req.query;
+    const contexto = construirContextoCalendario({ mes, horaCorte, festivos });
+
+    const [estudiantes, profesores] = await Promise.all([
+      Estudiante.find({}).select("grado grupo historial").lean(),
+      Usuario.find({ rol: "profesor" }).select("nombre gradoAsignado grupoAsignado").lean()
+    ]);
+
+    const profesorPorSalon = new Map();
+    profesores.forEach((profesor) => {
+      const grado = normalizeGrade(profesor.gradoAsignado);
+      const grupo = normalizeGroup(profesor.grupoAsignado);
+      if (!grado || !grupo) return;
+      const llave = `${grado}|${grupo}`;
+      const nombres = profesorPorSalon.get(llave) || [];
+      nombres.push(profesor.nombre);
+      profesorPorSalon.set(llave, nombres);
+    });
+
+    // Los salones salen de los estudiantes: asi aparecen todos, tengan profesor asignado o no.
+    const estudiantesPorSalon = new Map();
+    estudiantes.forEach((estudiante) => {
+      const grado = normalizeGrade(estudiante.grado);
+      const grupo = normalizeGroup(estudiante.grupo);
+      if (!grado || !grupo) return;
+      const llave = `${grado}|${grupo}`;
+      if (!estudiantesPorSalon.has(llave)) {
+        estudiantesPorSalon.set(llave, []);
+      }
+      estudiantesPorSalon.get(llave).push(estudiante);
+    });
+
+    const salones = Array.from(estudiantesPorSalon.entries()).map(([llave, listaEstudiantes]) => {
+      const [grado, grupo] = llave.split("|");
+      const registrosPorDia = agruparRegistrosPorDia(listaEstudiantes, contexto.start, contexto.end);
+      const dias = construirDiasCalendario(registrosPorDia, contexto);
+      const resumen = resumirDiasCalendario(dias);
+      const diaHoy = dias.find((dia) => dia.fecha === contexto.hoyKey) || null;
+
+      return {
+        grado,
+        grupo,
+        profesores: profesorPorSalon.get(llave) || [],
+        totalEstudiantes: listaEstudiantes.length,
+        dias,
+        ...resumen,
+        estadoHoy: contexto.esMesActual && diaHoy ? diaHoy.estado : "",
+        estudiantesRegistradosHoy: diaHoy ? diaHoy.estudiantesRegistrados : 0
+      };
+    });
+
+    salones.sort((a, b) => {
+      const gradoA = Number(a.grado);
+      const gradoB = Number(b.grado);
+      if (Number.isFinite(gradoA) && Number.isFinite(gradoB) && gradoA !== gradoB) return gradoA - gradoB;
+      if (a.grado !== b.grado) return String(a.grado).localeCompare(String(b.grado), "es");
+      return String(a.grupo).localeCompare(String(b.grupo), "es");
+    });
+
+    const alDia = salones.filter((salon) => !salon.diasFaltantes.length).length;
+    const pendientesHoy = salones.filter((salon) => salon.estadoHoy === "faltante").length;
+    const totalFaltantes = salones.reduce((total, salon) => total + salon.diasFaltantes.length, 0);
+
+    return res.json({
+      mes: contexto.monthKey,
+      horaCorte: formatearHoraCorte(contexto.horaCorteMinutos),
+      festivosDelMes: listHolidayDayKeys(contexto.start, contexto.end, contexto.holidayConfig),
+      totalSalones: salones.length,
+      salonesAlDia: alDia,
+      salonesConPendientes: salones.length - alDia,
+      salonesSinRegistrarHoy: pendientesHoy,
+      totalDiasFaltantes: totalFaltantes,
+      salones
+    });
+  } catch (error) {
+    logger.error(`Error al generar el tablero de calendarios: ${error.message}`);
+    return res.status(500).json({ error: "Error al generar los calendarios del mes" });
   }
 });
 

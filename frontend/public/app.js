@@ -23,6 +23,8 @@ let registroAsistenciaEditando = { registroId: "", estudianteId: "" };
 let toastTimeoutId = null;
 let mesCalendarioSalon = "";
 let calendarioSalonActual = null;
+let mesCalendariosTablero = "";
+let calendariosMesActual = null;
 let aniosLectivosData = null;
 let archivoEstudiantesActual = [];
 let archivoAnioActual = "";
@@ -171,6 +173,9 @@ function inicializarEventos() {
 
   // Año lectivo
   setupAnioLectivo();
+
+  // Tablero de calendarios
+  setupCalendariosMes();
 }
 
 function leerJsonSeguro(response) {
@@ -255,6 +260,15 @@ function mostrarApp() {
       tabUsuarios.classList.remove("hidden");
     } else {
       tabUsuarios.classList.add("hidden");
+    }
+  }
+
+  const tabCalendarios = document.getElementById("tab-calendarios");
+  if (tabCalendarios) {
+    if (usuarioActual?.rol === "admin") {
+      tabCalendarios.classList.remove("hidden");
+    } else {
+      tabCalendarios.classList.add("hidden");
     }
   }
 
@@ -428,6 +442,8 @@ function cambiarVista(vista) {
     cargarUsuarios();
   } else if (vista === "anio-lectivo") {
     cargarAniosLectivos();
+  } else if (vista === "calendarios") {
+    cargarCalendariosMes();
   }
 }
 
@@ -3632,4 +3648,206 @@ function exportarArchivoCsv() {
   link.download = `archivo_${archivoAnioActual}_${new Date().toISOString().split("T")[0]}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+// ==================== TABLERO DE CALENDARIOS ====================
+function setupCalendariosMes() {
+  const btnAnterior = document.getElementById("btn-calendarios-mes-anterior");
+  if (!btnAnterior) return;
+
+  btnAnterior.addEventListener("click", () => cambiarMesCalendariosMes(-1));
+  document.getElementById("btn-calendarios-mes-siguiente").addEventListener("click", () => cambiarMesCalendariosMes(1));
+  document.getElementById("btn-recargar-calendarios").addEventListener("click", cargarCalendariosMes);
+  document.getElementById("calendarios-solo-pendientes").addEventListener("change", () => {
+    renderCalendariosMes(calendariosMesActual);
+  });
+}
+
+function cambiarMesCalendariosMes(delta) {
+  const [anio, mes] = (mesCalendariosTablero || obtenerMesActual()).split("-").map(Number);
+  const nuevaFecha = new Date(anio, (mes - 1) + delta, 1);
+  mesCalendariosTablero = `${nuevaFecha.getFullYear()}-${String(nuevaFecha.getMonth() + 1).padStart(2, "0")}`;
+  cargarCalendariosMes();
+}
+
+function mostrarEstadoCalendarios(mensaje, color = "slate") {
+  const estado = document.getElementById("calendarios-estado");
+  if (!estado) return;
+  estado.textContent = mensaje;
+  estado.className = `text-sm mb-4 text-${color}-600`;
+}
+
+async function cargarCalendariosMes() {
+  if (usuarioActual?.rol !== "admin") return;
+
+  const mes = mesCalendariosTablero || obtenerMesActual();
+  mesCalendariosTablero = mes;
+  mostrarEstadoCalendarios("Cargando calendarios...", "slate");
+
+  try {
+    const response = await fetch(`${API_URL}/asistencia/calendarios-mes?mes=${encodeURIComponent(mes)}`, {
+      headers: getHeaders()
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudieron cargar los calendarios.");
+    }
+
+    calendariosMesActual = data;
+    renderCalendariosMes(data);
+    mostrarEstadoCalendarios("", "slate");
+  } catch (error) {
+    calendariosMesActual = null;
+    document.getElementById("calendarios-grid").innerHTML = "";
+    document.getElementById("calendarios-resumen").innerHTML = "";
+    mostrarEstadoCalendarios(error.message, "red");
+  }
+}
+
+function renderCalendariosMes(data) {
+  if (!data) return;
+
+  const titulo = document.getElementById("calendarios-mes-titulo");
+  const [anioTexto, mesTexto] = String(data.mes || obtenerMesActual()).split("-");
+  const mesIndice = Number(mesTexto) - 1;
+  if (titulo) titulo.textContent = `${MESES_NOMBRES_CALENDARIO[mesIndice] || ""} ${anioTexto}`;
+
+  renderResumenCalendariosMes(data);
+
+  const soloPendientes = document.getElementById("calendarios-solo-pendientes")?.checked;
+  const salones = soloPendientes
+    ? (data.salones || []).filter((salon) => salon.diasFaltantes.length > 0)
+    : (data.salones || []);
+
+  const grid = document.getElementById("calendarios-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  if (!salones.length) {
+    grid.innerHTML = `<p class="text-slate-500 col-span-full text-center py-8">${
+      soloPendientes ? "Ningún salón tiene días pendientes en este mes. 🎉" : "No hay salones con estudiantes registrados."
+    }</p>`;
+    return;
+  }
+
+  salones.forEach((salon) => {
+    grid.appendChild(construirTarjetaSalonCalendario(salon, data));
+  });
+}
+
+function renderResumenCalendariosMes(data) {
+  const contenedor = document.getElementById("calendarios-resumen");
+  if (!contenedor) return;
+
+  const tarjetas = [
+    ["Salones", data.totalSalones ?? 0, "text-slate-800", "border-slate-200 bg-slate-50"],
+    ["Al día", data.salonesAlDia ?? 0, "text-green-700", "border-green-200 bg-green-50"],
+    ["Con pendientes", data.salonesConPendientes ?? 0, "text-red-700", "border-red-200 bg-red-50"],
+    ["Días sin subir", data.totalDiasFaltantes ?? 0, "text-amber-700", "border-amber-200 bg-amber-50"]
+  ];
+
+  contenedor.innerHTML = tarjetas.map(([titulo, valor, colorTexto, colorCaja]) => `
+    <div class="rounded-lg border ${colorCaja} p-4 text-center">
+      <div class="text-3xl font-bold ${colorTexto}">${valor}</div>
+      <div class="text-xs font-medium text-slate-600 uppercase">${titulo}</div>
+    </div>
+  `).join("");
+}
+
+function construirTarjetaSalonCalendario(salon, data) {
+  const tarjeta = document.createElement("div");
+  const faltantes = salon.diasFaltantes.length;
+  const borde = faltantes === 0
+    ? "border-green-300"
+    : (faltantes >= 3 ? "border-red-300" : "border-amber-300");
+
+  tarjeta.className = `border-2 ${borde} rounded-xl overflow-hidden bg-white`;
+
+  const etiqueta = faltantes === 0
+    ? '<span class="text-[10px] font-bold uppercase px-2 py-1 rounded bg-green-100 text-green-800">Al día</span>'
+    : `<span class="text-[10px] font-bold uppercase px-2 py-1 rounded bg-red-100 text-red-800">Faltan ${faltantes}</span>`;
+
+  const profesores = salon.profesores?.length
+    ? salon.profesores.join(", ")
+    : "Sin profesor asignado";
+
+  // Encabezado con el salon, el profesor y el estado del mes.
+  const encabezado = `
+    <div class="flex items-start justify-between gap-2 px-4 py-3 border-b-2 border-slate-200 bg-slate-50">
+      <div class="min-w-0">
+        <p class="font-bold text-slate-800">${formatearGrado(salon.grado)} ${escaparHtml(salon.grupo)}</p>
+        <p class="text-xs text-slate-500 truncate" title="${escaparHtml(profesores)}">${escaparHtml(profesores)}</p>
+      </div>
+      <div class="text-right shrink-0">
+        ${etiqueta}
+        <p class="text-xs text-slate-600 mt-1">${salon.cumplimientoPorcentaje}%</p>
+      </div>
+    </div>
+  `;
+
+  const nombresColumnas = ["L", "M", "X", "J", "V", "S", "D"];
+  const cabeceraDias = nombresColumnas
+    .map((nombre) => `<div class="text-center text-[10px] font-bold text-slate-400 py-1">${nombre}</div>`)
+    .join("");
+
+  const primerDia = new Date(Number(data.mes.split("-")[0]), Number(data.mes.split("-")[1]) - 1, 1).getDay();
+  const relleno = (primerDia + 6) % 7;
+  let celdas = "";
+  for (let i = 0; i < relleno; i++) {
+    celdas += '<div class="aspect-square"></div>';
+  }
+
+  (salon.dias || []).forEach((dia) => {
+    const anillo = dia.esHoy ? " ring-2 ring-inset ring-blue-700" : "";
+    celdas += `
+      <div class="aspect-square flex items-center justify-center rounded text-[10px] font-semibold ${obtenerEstiloDiaCalendario(dia)}${anillo}"
+        title="${dia.fecha} · ${describirEstadoDia(dia)}">${dia.dia}</div>
+    `;
+  });
+
+  const pieDetalle = salon.diasFaltantes.length
+    ? `<p class="text-xs text-red-700 mt-2">Sin subir: ${salon.diasFaltantes.map((f) => Number(f.slice(-2))).join(", ")}</p>`
+    : '<p class="text-xs text-green-700 mt-2">Todos los días del mes están al día.</p>';
+
+  tarjeta.innerHTML = `
+    ${encabezado}
+    <div class="p-3">
+      <div class="grid grid-cols-7 gap-0.5">${cabeceraDias}</div>
+      <div class="grid grid-cols-7 gap-0.5">${celdas}</div>
+      <p class="text-xs text-slate-600 mt-2">
+        ${salon.diasRegistrados} de ${salon.diasHabiles} día(s) · ${salon.totalEstudiantes} estudiante(s)
+      </p>
+      ${pieDetalle}
+      <button type="button" class="btn-abrir-salon mt-3 w-full text-xs bg-slate-700 text-white px-3 py-2 rounded-lg hover:bg-slate-800">
+        <i class="fas fa-arrow-right mr-1"></i>Abrir este salón
+      </button>
+    </div>
+  `;
+
+  tarjeta.querySelector(".btn-abrir-salon").addEventListener("click", () => {
+    abrirSalonDesdeCalendarios(salon.grado, salon.grupo);
+  });
+
+  return tarjeta;
+}
+
+function describirEstadoDia(dia) {
+  if (dia.estado === "registrado") return `registrado (${dia.estudiantesRegistrados} estudiante(s))`;
+  if (dia.estado === "faltante") return "sin registrar";
+  if (dia.estado === "pendiente_hoy") return "pendiente de hoy";
+  if (dia.estado === "festivo") return "festivo";
+  if (dia.estado === "fin_de_semana") return "fin de semana";
+  return "aún no llega";
+}
+
+// Salta a la vista de Grados con el salon ya cargado.
+function abrirSalonDesdeCalendarios(grado, grupo) {
+  salonActual = { grado, grupo };
+  cambiarVista("salones");
+  const selectGrado = document.getElementById("salon-grado");
+  const selectGrupo = document.getElementById("salon-grupo");
+  if (selectGrado) selectGrado.value = grado;
+  if (selectGrupo) selectGrupo.value = grupo;
+  cargarEstudiantesSalon();
 }
