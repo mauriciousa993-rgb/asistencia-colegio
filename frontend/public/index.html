@@ -293,6 +293,9 @@
           <button data-view="usuarios" id="tab-usuarios" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900 hidden">
             <i class="fas fa-user-cog mr-2"></i>Usuarios
           </button>
+          <button data-view="anio-lectivo" id="tab-anio-lectivo" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900 hidden">
+            <i class="fas fa-graduation-cap mr-2"></i>Año Lectivo
+          </button>
         </div>
       </div>
     </div>
@@ -322,7 +325,7 @@
             <div class="grid md:grid-cols-2 gap-4">
                 <div>
                   <label class="block text-sm font-medium mb-1">Tipo</label>
-                  <select id="tipo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                  <select id="tipo" data-rol="tipo-asistencia" class="w-full border border-slate-300 rounded-lg px-4 py-2">
                     <option value="presente">Presente</option>
                     <option value="falta">Falta</option>
                     <option value="retardo">Retardo</option>
@@ -333,6 +336,17 @@
                   <label class="block text-sm font-medium mb-1">Fecha</label>
                   <input id="fecha-asistencia" type="date" class="w-full border border-slate-300 rounded-lg px-4 py-2">
                 </div>
+              </div>
+              <div id="bloque-motivo-salida" class="hidden">
+                <label class="block text-sm font-medium mb-1">Motivo del permiso *</label>
+                <select id="motivo-salida" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                  <option value="">Seleccionar motivo</option>
+                  <option value="deportivo">Deportivo</option>
+                  <option value="enfermedad">Enfermedad</option>
+                  <option value="cita_medica">Cita m&eacute;dica</option>
+                  <option value="familiar">Familiar</option>
+                  <option value="otro">Otro</option>
+                </select>
               </div>
               <div>
                 <label class="block text-sm font-medium mb-1">Observacion</label>
@@ -389,6 +403,63 @@
             </div>
           </div>
 
+          <!-- Calendario mensual del salon -->
+          <div id="salon-calendario-card" class="hidden mb-6">
+            <div class="grid lg:grid-cols-[360px_1fr] gap-6 items-start">
+              <div class="border-2 border-slate-300 rounded-xl overflow-hidden bg-white relative">
+                <div class="flex items-center justify-between px-4 pt-4 pb-3 border-b-2 border-slate-300">
+                  <button id="btn-cal-mes-anterior" aria-label="Mes anterior"
+                    class="w-8 h-8 border-2 border-slate-300 rounded flex items-center justify-center text-slate-700 hover:border-blue-600 hover:text-blue-600">
+                    <i class="fas fa-chevron-left text-xs"></i>
+                  </button>
+                  <div class="text-center">
+                    <div id="salon-cal-mes" class="font-bold text-slate-800 capitalize">-</div>
+                    <div id="salon-cal-subtitulo" class="text-xs text-slate-500">Asistencia registrada</div>
+                  </div>
+                  <button id="btn-cal-mes-siguiente" aria-label="Mes siguiente"
+                    class="w-8 h-8 border-2 border-slate-300 rounded flex items-center justify-center text-slate-700 hover:border-blue-600 hover:text-blue-600">
+                    <i class="fas fa-chevron-right text-xs"></i>
+                  </button>
+                </div>
+
+                <div class="grid grid-cols-7 border-b-2 border-slate-300">
+                  <div class="text-center py-2 text-[11px] font-bold text-slate-500">L</div>
+                  <div class="text-center py-2 text-[11px] font-bold text-slate-500">M</div>
+                  <div class="text-center py-2 text-[11px] font-bold text-slate-500">X</div>
+                  <div class="text-center py-2 text-[11px] font-bold text-slate-500">J</div>
+                  <div class="text-center py-2 text-[11px] font-bold text-slate-500">V</div>
+                  <div class="text-center py-2 text-[11px] font-bold text-slate-500">S</div>
+                  <div class="text-center py-2 text-[11px] font-bold text-slate-500">D</div>
+                </div>
+
+                <div id="salon-cal-dias" class="grid grid-cols-7"></div>
+
+                <div class="flex flex-wrap gap-x-4 gap-y-2 px-4 py-3 text-[11px] text-slate-600">
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-green-500"></span>Al día</span>
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-red-500"></span>Sin registrar</span>
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-blue-400"></span>Pendiente hoy</span>
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-amber-300"></span>Festivo</span>
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-slate-200"></span>Fin de semana</span>
+                </div>
+
+                <!-- Detalle del dia seleccionado -->
+                <div id="salon-cal-detalle" class="hidden absolute inset-0 bg-black/35 flex items-center justify-center p-4">
+                  <div class="bg-white border-2 border-slate-300 rounded-lg w-full max-w-[260px] p-4 shadow-lg">
+                    <div id="salon-cal-detalle-fecha" class="font-bold text-[15px] mb-1"></div>
+                    <span id="salon-cal-detalle-tag" class="inline-block text-xs font-semibold px-2 py-1 rounded mb-2"></span>
+                    <p id="salon-cal-detalle-texto" class="text-xs text-slate-600 leading-relaxed"></p>
+                    <button id="btn-cerrar-cal-detalle" type="button"
+                      class="mt-3 w-full bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm hover:bg-slate-300">
+                      Cerrar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="salon-cal-resumen" class="grid sm:grid-cols-2 gap-3"></div>
+            </div>
+          </div>
+
           <div id="salon-content" class="hidden">
             <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
               <div>
@@ -420,6 +491,7 @@
                     <th class="px-4 py-2 text-left">Nombre</th>
                     <th class="px-4 py-2 text-left">Identificacion</th>
                     <th class="px-4 py-2 text-center">Estado</th>
+                    <th class="px-4 py-2 text-center">Motivo del permiso</th>
                     <th class="px-4 py-2 text-left">Observacion</th>
                   </tr>
                 </thead>
@@ -747,6 +819,14 @@
                 <div class="text-sm text-slate-600">Total Permisos</div>
               </div>
             </div>
+
+            <div class="border rounded-lg p-4 mb-4">
+              <p class="text-sm font-semibold text-slate-700 mb-3">
+                <i class="fas fa-right-from-bracket text-purple-600 mr-1"></i>Permisos por motivo
+              </p>
+              <div id="stat-salidas-motivos" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
+            </div>
+
             <div class="flex gap-4">
               <input type="date" id="fecha-inicio" class="border border-slate-300 rounded-lg px-4 py-2">
               <input type="date" id="fecha-fin" class="border border-slate-300 rounded-lg px-4 py-2">
@@ -840,6 +920,14 @@
                 <option value="falta">Falta</option>
                 <option value="retardo">Retardo</option>
                 <option value="salida">Permiso</option>
+              </select>
+              <select id="reportes-conv-motivo-filtro" class="border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Permisos: todos los motivos</option>
+                <option value="deportivo">Deportivo</option>
+                <option value="enfermedad">Enfermedad</option>
+                <option value="cita_medica">Cita m&eacute;dica</option>
+                <option value="familiar">Familiar</option>
+                <option value="otro">Otro</option>
               </select>
               <input id="reportes-conv-fecha-mes" type="month" class="border border-slate-300 rounded-lg px-4 py-2" placeholder="Mes">
               <input id="reportes-conv-fecha-dia" type="date" class="border border-slate-300 rounded-lg px-4 py-2" placeholder="Día">
@@ -966,6 +1054,146 @@
 
         </div>
       </div>
+
+      <!-- Año Lectivo View (solo admin) -->
+      <div id="view-anio-lectivo" class="view hidden">
+        <div class="grid gap-8">
+
+          <!-- Cierre de año y promocion -->
+          <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-xl font-semibold mb-1">
+              <i class="fas fa-forward text-blue-600 mr-2"></i>Cierre de año y paso al grado siguiente
+            </h2>
+            <p class="text-sm text-slate-600 mb-4">
+              Guarda una copia completa del año que termina y sube a todos los estudiantes al grado siguiente.
+            </p>
+
+            <div class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 mb-5">
+              <p class="font-semibold mb-2">Que hace el boton, paso a paso:</p>
+              <ol class="list-decimal ml-5 space-y-1">
+                <li>Archiva todos los estudiantes con su asistencia y convivencia del año que termina (queda consultable para siempre).</li>
+                <li>Sube cada estudiante al grado siguiente: 6&deg;&rarr;7&deg;, 7&deg;&rarr;8&deg;, 8&deg;&rarr;9&deg;, 9&deg;&rarr;10&deg;, 10&deg;&rarr;11&deg;.</li>
+                <li>Los de 11&deg; se gradúan: salen de la lista activa y quedan solo en el archivo.</li>
+                <li>6&deg; queda vacío y listo para importar a los que llegan de 5&deg;.</li>
+                <li>El historial de asistencia del año viejo se limpia en la lista activa para empezar el año nuevo en cero.</li>
+              </ol>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-4 mb-4">
+              <div>
+                <label class="block text-sm font-medium mb-1">Año que se archiva</label>
+                <input id="anio-archivar" type="text" placeholder="2025-2026"
+                  class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Año nuevo</label>
+                <input id="anio-nuevo" type="text" placeholder="2026-2027"
+                  class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              </div>
+              <div class="flex items-end">
+                <button id="btn-simular-promocion" class="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 w-full">
+                  <i class="fas fa-eye mr-2"></i>Ver simulación
+                </button>
+              </div>
+            </div>
+
+            <div id="promocion-simulacion" class="hidden rounded-lg border border-slate-200 p-4 mb-4"></div>
+            <p id="anio-lectivo-estado" class="text-sm mb-4"></p>
+
+            <div class="border-t pt-4 flex flex-wrap items-center justify-between gap-3">
+              <p class="text-sm text-slate-600">
+                <i class="fas fa-triangle-exclamation text-amber-500 mr-1"></i>
+                Esta acción se hace una sola vez por año y no se puede deshacer desde la aplicación.
+              </p>
+              <button id="btn-ejecutar-promocion" class="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700">
+                <i class="fas fa-graduation-cap mr-2"></i>Archivar año y promover estudiantes
+              </button>
+            </div>
+          </div>
+
+          <!-- Consulta de años archivados -->
+          <div class="bg-white rounded-xl shadow p-6">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h2 class="text-xl font-semibold">
+                <i class="fas fa-box-archive text-slate-600 mr-2"></i>Consultar años archivados
+              </h2>
+              <button id="btn-recargar-anios" class="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800">
+                Actualizar
+              </button>
+            </div>
+
+            <div id="anios-lectivos-resumen" class="grid md:grid-cols-3 gap-3 mb-5"></div>
+
+            <div class="grid md:grid-cols-5 gap-3 mb-4">
+              <div>
+                <label class="block text-sm font-medium mb-1">Año lectivo</label>
+                <select id="archivo-anio" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                  <option value="">Seleccionar año</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Grado</label>
+                <select id="archivo-grado" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                  <option value="">Todos</option>
+                  <option value="6">6&deg;</option>
+                  <option value="7">7&deg;</option>
+                  <option value="8">8&deg;</option>
+                  <option value="9">9&deg;</option>
+                  <option value="10">10&deg;</option>
+                  <option value="11">11&deg;</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Grupo</label>
+                <select id="archivo-grupo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                  <option value="">Todos</option>
+                  <option value="A">A</option>
+                  <option value="B">B</option>
+                  <option value="C">C</option>
+                  <option value="D">D</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Buscar</label>
+                <input id="archivo-busqueda" type="text" placeholder="Nombre o identificación"
+                  class="w-full border border-slate-300 rounded-lg px-4 py-2">
+              </div>
+              <div class="flex items-end gap-2">
+                <button id="btn-cargar-archivo" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex-1">
+                  Consultar
+                </button>
+                <button id="btn-exportar-archivo" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                  <i class="fas fa-file-csv"></i>
+                </button>
+              </div>
+            </div>
+
+            <p id="archivo-estado" class="text-sm mb-3"></p>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left">Estudiante</th>
+                    <th class="px-4 py-2 text-left">Identificación</th>
+                    <th class="px-4 py-2 text-left">Grado</th>
+                    <th class="px-4 py-2 text-left">Grupo</th>
+                    <th class="px-4 py-2 text-center">Presentes</th>
+                    <th class="px-4 py-2 text-center">Faltas</th>
+                    <th class="px-4 py-2 text-center">Retardos</th>
+                    <th class="px-4 py-2 text-center">Permisos</th>
+                    <th class="px-4 py-2 text-center">Convivencia</th>
+                    <th class="px-4 py-2 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla-archivo"></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -1182,6 +1410,17 @@
             </select>
           </div>
         </div>
+        <div id="edit-rep-bloque-motivo" class="hidden">
+          <label class="block text-sm font-medium mb-1">Motivo del permiso *</label>
+          <select id="edit-rep-motivo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            <option value="">Seleccionar motivo</option>
+            <option value="deportivo">Deportivo</option>
+            <option value="enfermedad">Enfermedad</option>
+            <option value="cita_medica">Cita m&eacute;dica</option>
+            <option value="familiar">Familiar</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
         <div>
           <label class="block text-sm font-medium mb-1">Observacion</label>
           <textarea id="edit-rep-observacion" rows="3"
@@ -1217,6 +1456,50 @@
         <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded bg-slate-200"></span> Fin de semana</span>
         <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded bg-white border border-slate-300"></span> Aun no llega</span>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal Confirmar Cierre de Año -->
+  <div id="modal-confirmar-promocion" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 w-full max-w-lg">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-semibold text-red-700">
+          <i class="fas fa-triangle-exclamation mr-2"></i>Confirmar cierre de año
+        </h2>
+        <button id="btn-cerrar-confirmar-promocion" class="text-slate-500 hover:text-slate-700">
+          <i class="fas fa-times text-xl"></i>
+        </button>
+      </div>
+
+      <div id="confirmar-promocion-detalle" class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm mb-4"></div>
+
+      <label class="block text-sm font-medium mb-1">Para confirmar, escribe <span class="font-bold">PROMOVER</span></label>
+      <input id="confirmar-promocion-texto" type="text" placeholder="PROMOVER"
+        class="w-full border border-slate-300 rounded-lg px-4 py-2 mb-3 uppercase">
+
+      <p id="confirmar-promocion-estado" class="text-sm mb-3"></p>
+
+      <div class="flex justify-end gap-3">
+        <button id="btn-cancelar-confirmar-promocion" type="button" class="bg-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-400">
+          Cancelar
+        </button>
+        <button id="btn-confirmar-promocion" type="button" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">
+          Sí, archivar y promover
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Perfil Archivado -->
+  <div id="modal-perfil-archivado" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4">
+        <h2 id="perfil-archivado-titulo" class="text-xl font-semibold">Historial archivado</h2>
+        <button id="btn-cerrar-perfil-archivado" class="text-slate-500 hover:text-slate-700">
+          <i class="fas fa-times text-xl"></i>
+        </button>
+      </div>
+      <div id="perfil-archivado-contenido" class="space-y-4 text-sm"></div>
     </div>
   </div>
 

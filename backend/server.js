@@ -12,6 +12,17 @@ const {
   parseCsv,
   buildStudentFromRow
 } = require("./utils/estudiantesCsv");
+const {
+  GRADO_FINAL_BACHILLERATO,
+  normalizeGrade,
+  normalizeGroup,
+  normalizeSchoolYear,
+  isConsecutiveSchoolYear,
+  sugerirAniosLectivos,
+  calcularGradoSiguiente,
+  construirPlanPromocion,
+  contarRegistrosArchivo
+} = require("./utils/anioLectivo");
 
 // Logger simple para operaciones críticas
 const logger = {
@@ -25,6 +36,12 @@ const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "secreto_super_seguro_2024";
 const SCHOOL_HOLIDAYS = process.env.SCHOOL_HOLIDAYS || "";
+// Colombia es UTC-5: sin este ajuste la "hora limite" se evaluaria con la hora de Londres.
+const SCHOOL_UTC_OFFSET_HOURS = Number.isFinite(Number(process.env.SCHOOL_UTC_OFFSET_HOURS))
+  ? Number(process.env.SCHOOL_UTC_OFFSET_HOURS)
+  : -5;
+// Plazo diario para subir la asistencia del dia.
+const SCHOOL_CUTOFF_TIME = process.env.SCHOOL_CUTOFF_TIME || "16:00";
 const MONGODB_SERVER_SELECTION_TIMEOUT_MS = Number(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS || 10000);
 const STARTUP_STUDENT_BACKUP = process.env.STARTUP_STUDENT_BACKUP === "true";
 
@@ -141,6 +158,12 @@ const estudianteSchema = new mongoose.Schema({
     {
       fecha: { type: Date, required: true },
       tipo: { type: String, enum: ["presente", "falta", "retardo", "salida"], required: true },
+      // Solo aplica cuando tipo === "salida" (permiso de salida).
+      motivoSalida: {
+        type: String,
+        enum: ["", "deportivo", "enfermedad", "cita_medica", "familiar", "otro"],
+        default: ""
+      },
       hora: { type: String },
       observacion: { type: String },
       fotoUrl: { type: String },
@@ -166,13 +189,47 @@ const estudianteSchema = new mongoose.Schema({
 
 const Estudiante = mongoose.model("Estudiante", estudianteSchema);
 
-function normalizeGrade(value) {
-  return String(value || "").trim().replace(/[^\dA-Za-z]/g, "");
-}
+// Schema de Año Lectivo (control del cierre y archivo de cada año)
+const anioLectivoSchema = new mongoose.Schema({
+  anio: { type: String, required: true, unique: true },
+  estado: { type: String, enum: ["activo", "archivado"], default: "activo" },
+  fechaArchivado: { type: Date },
+  archivadoPor: { type: String, default: "" },
+  totalEstudiantes: { type: Number, default: 0 },
+  totalRegistrosAsistencia: { type: Number, default: 0 },
+  totalReportesConvivencia: { type: Number, default: 0 },
+  graduados: { type: Number, default: 0 },
+  promovidos: { type: Number, default: 0 }
+}, { timestamps: true });
 
-function normalizeGroup(value) {
-  return String(value || "").trim().toUpperCase();
-}
+const AnioLectivo = mongoose.model("AnioLectivo", anioLectivoSchema);
+
+// Schema de Estudiante Archivado (foto congelada del estudiante al cerrar el año)
+const estudianteArchivadoSchema = new mongoose.Schema({
+  anioLectivo: { type: String, required: true },
+  estudianteOriginalId: { type: mongoose.Schema.Types.ObjectId },
+  nombre: { type: String, required: true },
+  grado: { type: String, default: "" },
+  grupo: { type: String, default: "" },
+  identificacion: { type: String, default: "" },
+  fechaNacimiento: { type: Date },
+  direccion: { type: String, default: "" },
+  telefono: { type: String, default: "" },
+  email: { type: String, default: "" },
+  padre: { type: Object, default: {} },
+  madre: { type: Object, default: {} },
+  tutor: { type: Object, default: {} },
+  historial: { type: Array, default: [] },
+  reportesConvivencia: { type: Array, default: [] },
+  graduado: { type: Boolean, default: false },
+  gradoSiguiente: { type: String, default: "" },
+  fechaArchivado: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+estudianteArchivadoSchema.index({ anioLectivo: 1, grado: 1, grupo: 1 });
+estudianteArchivadoSchema.index({ anioLectivo: 1, identificacion: 1 });
+
+const EstudianteArchivado = mongoose.model("EstudianteArchivado", estudianteArchivadoSchema);
 
 function normalizeSeverity(value) {
   const raw = String(value || "").trim().toLowerCase();
@@ -196,6 +253,54 @@ function getDateKey(value) {
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+// Devuelve un Date corrido al huso del colegio para poder leerlo con los getters UTC.
+function obtenerAhoraLocal(referencia = new Date()) {
+  return new Date(referencia.getTime() + (SCHOOL_UTC_OFFSET_HOURS * 60 * 60 * 1000));
+}
+
+function finDelDiaLocal(fechaLocal) {
+  return new Date(Date.UTC(
+    fechaLocal.getUTCFullYear(),
+    fechaLocal.getUTCMonth(),
+    fechaLocal.getUTCDate(),
+    23, 59, 59, 999
+  ));
+}
+
+// La asistencia se guarda anclada al mediodia UTC del dia escolar: asi el dia
+// que se ve en el calendario no cambia por la zona horaria del equipo que registra.
+function normalizarFechaAsistencia(fecha) {
+  // "2026-08-16" ya es un dia escolar: se toma tal cual, sin convertir husos.
+  const soloFecha = String(fecha || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(soloFecha)) {
+    const [anio, mes, dia] = soloFecha.split("-").map(Number);
+    return new Date(Date.UTC(anio, mes - 1, dia, 12, 0, 0, 0));
+  }
+
+  const original = new Date(fecha);
+  if (Number.isNaN(original.getTime())) return null;
+  const local = obtenerAhoraLocal(original);
+  return new Date(Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth(),
+    local.getUTCDate(),
+    12, 0, 0, 0
+  ));
+}
+
+function parseHoraCorteMinutos(valor) {
+  const [horaRaw = "16", minutoRaw = "00"] = String(valor || SCHOOL_CUTOFF_TIME).split(":");
+  const hora = Number(horaRaw);
+  const minuto = Number(minutoRaw);
+  const horaValida = Number.isFinite(hora) && hora >= 0 && hora <= 23 ? hora : 16;
+  const minutoValido = Number.isFinite(minuto) && minuto >= 0 && minuto <= 59 ? minuto : 0;
+  return (horaValida * 60) + minutoValido;
+}
+
+function formatearHoraCorte(minutos) {
+  return `${String(Math.floor(minutos / 60)).padStart(2, "0")}:${String(minutos % 60).padStart(2, "0")}`;
 }
 
 function getMonthKey(value = new Date()) {
@@ -329,6 +434,22 @@ function normalizeAttendanceType(value) {
   return "";
 }
 
+// Motivos validos de un permiso de salida.
+const MOTIVOS_SALIDA = ["deportivo", "enfermedad", "cita_medica", "familiar", "otro"];
+
+function normalizeMotivoSalida(value) {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\s-]+/g, "_");
+  if (raw === "deporte" || raw === "deportiva") return "deportivo";
+  if (raw === "medica" || raw === "citamedica") return "cita_medica";
+  if (raw === "salud") return "enfermedad";
+  return MOTIVOS_SALIDA.includes(raw) ? raw : "";
+}
+
 function hasDuplicateAttendanceRecord(estudiante, candidate, excludeRecordId = "") {
   const targetDate = getDateKey(candidate.fecha);
   const targetTipo = normalizeAttendanceType(candidate.tipo);
@@ -372,6 +493,14 @@ function canAccessStudent(reqUser, estudiante) {
     normalizeGrade(estudiante?.grado) === scope.grado &&
     normalizeGroup(estudiante?.grupo) === scope.grupo
   );
+}
+
+// ============ UTILIDADES DE AÑO LECTIVO ============
+
+function esAdmin(req, res) {
+  if (req.user?.rol === "admin") return true;
+  res.status(403).json({ error: "Solo administradores pueden gestionar el año lectivo." });
+  return false;
 }
 
 // ============ CONEXIÓN A MONGODB ============
@@ -906,10 +1035,379 @@ app.delete("/api/estudiantes/:id", autenticarToken, async (req, res) => {
   }
 });
 
+// ============ ENDPOINTS DE AÑO LECTIVO ============
+
+// Listado de años lectivos (archivados + año en curso)
+app.get("/api/anios-lectivos", autenticarToken, async (req, res) => {
+  try {
+    if (!esAdmin(req, res)) return;
+
+    const [registrados, agrupados, totalEstudiantesActivos] = await Promise.all([
+      AnioLectivo.find({}).lean(),
+      EstudianteArchivado.aggregate([
+        { $group: { _id: "$anioLectivo", totalEstudiantes: { $sum: 1 } } }
+      ]),
+      Estudiante.countDocuments()
+    ]);
+
+    const conteoPorAnio = new Map(
+      agrupados.map((item) => [item._id, item.totalEstudiantes])
+    );
+
+    const anios = new Map();
+    registrados.forEach((item) => {
+      anios.set(item.anio, {
+        anio: item.anio,
+        estado: item.estado,
+        fechaArchivado: item.fechaArchivado || null,
+        archivadoPor: item.archivadoPor || "",
+        totalEstudiantes: conteoPorAnio.get(item.anio) ?? item.totalEstudiantes ?? 0,
+        totalRegistrosAsistencia: item.totalRegistrosAsistencia || 0,
+        totalReportesConvivencia: item.totalReportesConvivencia || 0,
+        graduados: item.graduados || 0,
+        promovidos: item.promovidos || 0
+      });
+    });
+
+    // Años que tienen estudiantes archivados pero no quedaron registrados en la coleccion de años.
+    conteoPorAnio.forEach((total, anio) => {
+      if (anios.has(anio)) return;
+      anios.set(anio, {
+        anio,
+        estado: "archivado",
+        fechaArchivado: null,
+        archivadoPor: "",
+        totalEstudiantes: total,
+        totalRegistrosAsistencia: 0,
+        totalReportesConvivencia: 0,
+        graduados: 0,
+        promovidos: 0
+      });
+    });
+
+    const lista = Array.from(anios.values()).sort((a, b) => b.anio.localeCompare(a.anio));
+    const sugerencia = sugerirAniosLectivos();
+    const activo = lista.find((item) => item.estado === "activo");
+
+    return res.json({
+      anios: lista,
+      archivados: lista.filter((item) => item.estado === "archivado"),
+      anioActivo: activo?.anio || sugerencia.anioActual,
+      totalEstudiantesActivos,
+      sugerencia
+    });
+  } catch (error) {
+    logger.error(`Error al listar años lectivos: ${error.message}`);
+    return res.status(500).json({ error: "Error al obtener los años lectivos" });
+  }
+});
+
+// Simulación del traslado de grado (no modifica nada)
+app.get("/api/anios-lectivos/promocion/preview", autenticarToken, async (req, res) => {
+  try {
+    if (!esAdmin(req, res)) return;
+
+    const estudiantes = await Estudiante.find({})
+      .select("nombre identificacion grado grupo historial reportesConvivencia")
+      .lean();
+
+    const plan = construirPlanPromocion(estudiantes);
+    const totales = contarRegistrosArchivo(estudiantes);
+    const sugerencia = sugerirAniosLectivos();
+    const yaArchivado = await EstudianteArchivado.countDocuments({ anioLectivo: sugerencia.anioActual });
+
+    return res.json({
+      ...plan,
+      totalRegistrosAsistencia: totales.registros,
+      totalReportesConvivencia: totales.reportes,
+      gradoFinal: String(GRADO_FINAL_BACHILLERATO),
+      sugerencia,
+      yaExisteArchivo: yaArchivado > 0
+    });
+  } catch (error) {
+    logger.error(`Error en simulación de promoción: ${error.message}`);
+    return res.status(500).json({ error: "Error al generar la simulación de promoción" });
+  }
+});
+
+// Cierre de año: archiva el año actual y promueve a todos al grado siguiente
+app.post("/api/anios-lectivos/promocion", autenticarToken, async (req, res) => {
+  try {
+    if (!esAdmin(req, res)) return;
+
+    const { anioLectivo, anioNuevo, confirmacion } = req.body;
+
+    if (String(confirmacion || "").trim().toUpperCase() !== "PROMOVER") {
+      return res.status(400).json({ error: "Debes escribir PROMOVER para confirmar el cierre de año." });
+    }
+
+    const anioArchivo = normalizeSchoolYear(anioLectivo);
+    const anioSiguiente = normalizeSchoolYear(anioNuevo);
+    if (!anioArchivo || !anioSiguiente) {
+      return res.status(400).json({ error: "Los años lectivos deben tener el formato AAAA-AAAA (ejemplo: 2025-2026)." });
+    }
+    if (!isConsecutiveSchoolYear(anioArchivo, anioSiguiente)) {
+      return res.status(400).json({ error: `El año nuevo debe ser el siguiente a ${anioArchivo} (ejemplo: ${anioArchivo.split("-")[1]}-${Number(anioArchivo.split("-")[1]) + 1}).` });
+    }
+
+    const yaArchivado = await EstudianteArchivado.countDocuments({ anioLectivo: anioArchivo });
+    if (yaArchivado > 0) {
+      return res.status(409).json({
+        error: `El año ${anioArchivo} ya está archivado con ${yaArchivado} estudiante(s). No se puede archivar dos veces.`
+      });
+    }
+
+    const estudiantes = await Estudiante.find({}).lean();
+    if (!estudiantes.length) {
+      return res.status(400).json({ error: "No hay estudiantes activos para archivar y promover." });
+    }
+
+    // Respaldo en disco antes de tocar nada (best effort, la copia real queda en la base de datos).
+    await crearBackupEstudiantes();
+
+    const fechaArchivado = new Date();
+    const documentosArchivo = estudiantes.map((estudiante) => {
+      const { destino, motivo } = calcularGradoSiguiente(estudiante.grado);
+      return {
+        anioLectivo: anioArchivo,
+        estudianteOriginalId: estudiante._id,
+        nombre: estudiante.nombre,
+        grado: normalizeGrade(estudiante.grado),
+        grupo: normalizeGroup(estudiante.grupo),
+        identificacion: estudiante.identificacion || "",
+        fechaNacimiento: estudiante.fechaNacimiento || null,
+        direccion: estudiante.direccion || "",
+        telefono: estudiante.telefono || "",
+        email: estudiante.email || "",
+        padre: estudiante.padre || {},
+        madre: estudiante.madre || {},
+        tutor: estudiante.tutor || {},
+        historial: estudiante.historial || [],
+        reportesConvivencia: estudiante.reportesConvivencia || [],
+        graduado: motivo === "graduado",
+        gradoSiguiente: destino,
+        fechaArchivado
+      };
+    });
+
+    await EstudianteArchivado.insertMany(documentosArchivo);
+
+    // Verificación: solo se borra/promueve si el archivo quedó completo.
+    const archivadosReales = await EstudianteArchivado.countDocuments({ anioLectivo: anioArchivo });
+    if (archivadosReales !== estudiantes.length) {
+      logger.error(`Archivo incompleto para ${anioArchivo}: ${archivadosReales}/${estudiantes.length}. Se cancela la promoción.`);
+      return res.status(500).json({
+        error: `El archivo del año quedó incompleto (${archivadosReales} de ${estudiantes.length}). No se modificó ningún estudiante. Intenta de nuevo.`
+      });
+    }
+
+    const idsGraduados = [];
+    const operacionesPromocion = [];
+    const sinPromover = [];
+
+    estudiantes.forEach((estudiante) => {
+      const { destino, motivo } = calcularGradoSiguiente(estudiante.grado);
+      if (motivo === "graduado") {
+        idsGraduados.push(estudiante._id);
+        return;
+      }
+      if (motivo === "sin_grado") {
+        sinPromover.push({
+          nombre: estudiante.nombre || "",
+          identificacion: estudiante.identificacion || "",
+          grado: estudiante.grado || ""
+        });
+        return;
+      }
+      operacionesPromocion.push({
+        updateOne: {
+          filter: { _id: estudiante._id },
+          update: {
+            $set: {
+              grado: destino,
+              grupo: normalizeGroup(estudiante.grupo),
+              historial: [],
+              reportesConvivencia: []
+            }
+          }
+        }
+      });
+    });
+
+    if (idsGraduados.length) {
+      await Estudiante.deleteMany({ _id: { $in: idsGraduados } });
+    }
+    if (operacionesPromocion.length) {
+      await Estudiante.bulkWrite(operacionesPromocion);
+    }
+
+    const totales = contarRegistrosArchivo(estudiantes);
+
+    await AnioLectivo.updateOne(
+      { anio: anioArchivo },
+      {
+        $set: {
+          estado: "archivado",
+          fechaArchivado,
+          archivadoPor: req.user.nombre || req.user.username || "",
+          totalEstudiantes: estudiantes.length,
+          totalRegistrosAsistencia: totales.registros,
+          totalReportesConvivencia: totales.reportes,
+          graduados: idsGraduados.length,
+          promovidos: operacionesPromocion.length
+        }
+      },
+      { upsert: true }
+    );
+
+    await AnioLectivo.updateMany(
+      { anio: { $ne: anioSiguiente }, estado: "activo" },
+      { $set: { estado: "archivado" } }
+    );
+
+    await AnioLectivo.updateOne(
+      { anio: anioSiguiente },
+      { $set: { estado: "activo" }, $setOnInsert: { totalEstudiantes: 0 } },
+      { upsert: true }
+    );
+
+    const gradoLiberado = await Estudiante.countDocuments({ grado: "6" });
+
+    logger.warn(
+      `Cierre de año ejecutado por ${req.user.username}: ${anioArchivo} -> ${anioSiguiente}. ` +
+      `Archivados: ${estudiantes.length}, graduados (11°): ${idsGraduados.length}, promovidos: ${operacionesPromocion.length}.`
+    );
+
+    return res.json({
+      message: `Año ${anioArchivo} archivado y estudiantes promovidos a ${anioSiguiente}.`,
+      anioArchivado: anioArchivo,
+      anioNuevo: anioSiguiente,
+      totalArchivados: estudiantes.length,
+      graduados: idsGraduados.length,
+      promovidos: operacionesPromocion.length,
+      sinPromover,
+      totalRegistrosAsistencia: totales.registros,
+      totalReportesConvivencia: totales.reportes,
+      estudiantesEnSexto: gradoLiberado
+    });
+  } catch (error) {
+    logger.error(`Error en cierre de año lectivo: ${error.message}`);
+    return res.status(500).json({ error: "Error al archivar el año y promover estudiantes" });
+  }
+});
+
+// Consulta de estudiantes de un año archivado
+app.get("/api/anios-lectivos/:anio/estudiantes", autenticarToken, async (req, res) => {
+  try {
+    if (!esAdmin(req, res)) return;
+
+    const anio = normalizeSchoolYear(req.params.anio);
+    if (!anio) {
+      return res.status(400).json({ error: "Año lectivo inválido. Usa el formato AAAA-AAAA." });
+    }
+
+    const filtro = { anioLectivo: anio };
+    const gradoNormalizado = normalizeGrade(req.query.grado);
+    const grupoNormalizado = normalizeGroup(req.query.grupo);
+    if (gradoNormalizado) filtro.grado = gradoNormalizado;
+    if (grupoNormalizado) filtro.grupo = grupoNormalizado;
+
+    const busqueda = String(req.query.busqueda || "").trim();
+    if (busqueda) {
+      filtro.$or = [
+        { nombre: { $regex: busqueda, $options: "i" } },
+        { identificacion: { $regex: busqueda, $options: "i" } }
+      ];
+    }
+
+    const archivados = await EstudianteArchivado.find(filtro)
+      .select("nombre grado grupo identificacion graduado gradoSiguiente historial reportesConvivencia")
+      .sort({ grado: 1, grupo: 1, nombre: 1 })
+      .lean();
+
+    const lista = archivados.map((estudiante) => {
+      const historial = estudiante.historial || [];
+      return {
+        id: estudiante._id,
+        nombre: estudiante.nombre,
+        grado: estudiante.grado,
+        grupo: estudiante.grupo,
+        identificacion: estudiante.identificacion,
+        graduado: Boolean(estudiante.graduado),
+        gradoSiguiente: estudiante.gradoSiguiente || "",
+        presentes: historial.filter((item) => item.tipo === "presente").length,
+        faltas: historial.filter((item) => item.tipo === "falta").length,
+        retardos: historial.filter((item) => item.tipo === "retardo").length,
+        salidas: historial.filter((item) => item.tipo === "salida").length,
+        totalRegistros: historial.length,
+        totalReportesConvivencia: (estudiante.reportesConvivencia || []).length
+      };
+    });
+
+    return res.json({ anio, total: lista.length, estudiantes: lista });
+  } catch (error) {
+    logger.error(`Error al consultar archivo del año: ${error.message}`);
+    return res.status(500).json({ error: "Error al consultar los estudiantes archivados" });
+  }
+});
+
+// Perfil completo de un estudiante archivado
+app.get("/api/anios-lectivos/:anio/estudiantes/:id", autenticarToken, async (req, res) => {
+  try {
+    if (!esAdmin(req, res)) return;
+
+    const anio = normalizeSchoolYear(req.params.anio);
+    if (!anio) {
+      return res.status(400).json({ error: "Año lectivo inválido. Usa el formato AAAA-AAAA." });
+    }
+
+    const archivado = await EstudianteArchivado.findOne({
+      _id: req.params.id,
+      anioLectivo: anio
+    }).lean();
+
+    if (!archivado) {
+      return res.status(404).json({ error: "Estudiante archivado no encontrado" });
+    }
+
+    const historial = [...(archivado.historial || [])]
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    const reportesConvivencia = [...(archivado.reportesConvivencia || [])]
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    const resumenAsistencia = construirResumenAsistencia(historial);
+
+    return res.json({
+      anioLectivo: anio,
+      estudiante: {
+        id: archivado._id,
+        nombre: archivado.nombre,
+        grado: archivado.grado,
+        grupo: archivado.grupo,
+        identificacion: archivado.identificacion,
+        fechaNacimiento: archivado.fechaNacimiento,
+        direccion: archivado.direccion,
+        telefono: archivado.telefono,
+        email: archivado.email,
+        padre: archivado.padre || {},
+        madre: archivado.madre || {},
+        tutor: archivado.tutor || {},
+        graduado: Boolean(archivado.graduado),
+        gradoSiguiente: archivado.gradoSiguiente || ""
+      },
+      historial,
+      reportesConvivencia,
+      resumenAsistencia
+    });
+  } catch (error) {
+    logger.error(`Error al consultar perfil archivado: ${error.message}`);
+    return res.status(500).json({ error: "Error al consultar el perfil archivado" });
+  }
+});
+
 // ============ ENDPOINTS DE ASISTENCIA ============
 
 app.post("/api/asistencia", autenticarToken, async (req, res) => {
-  const { estudianteId, fecha, tipo, hora, observacion, fotoUrl } = req.body;
+  const { estudianteId, fecha, tipo, hora, observacion, fotoUrl, motivoSalida } = req.body;
 
   if (!estudianteId || !fecha || !tipo) {
     return res.status(400).json({ error: "Faltan campos obligatorios" });
@@ -924,8 +1422,8 @@ app.post("/api/asistencia", autenticarToken, async (req, res) => {
       return res.status(403).json({ error: "No tienes acceso a este estudiante" });
     }
 
-    const fechaRegistro = new Date(fecha);
-    if (Number.isNaN(fechaRegistro.getTime())) {
+    const fechaRegistro = normalizarFechaAsistencia(fecha);
+    if (!fechaRegistro) {
       return res.status(400).json({ error: "Fecha de asistencia invalida" });
     }
 
@@ -938,9 +1436,15 @@ app.post("/api/asistencia", autenticarToken, async (req, res) => {
       return res.status(400).json({ error: "La observación es obligatoria para registrar un permiso." });
     }
 
+    const motivoNormalizado = tipoNormalizado === "salida" ? normalizeMotivoSalida(motivoSalida) : "";
+    if (tipoNormalizado === "salida" && !motivoNormalizado) {
+      return res.status(400).json({ error: "Debes indicar el motivo del permiso (deportivo, enfermedad, cita médica, familiar u otro)." });
+    }
+
     const nuevoRegistro = {
       fecha: fechaRegistro,
       tipo: tipoNormalizado,
+      motivoSalida: motivoNormalizado,
       hora: typeof hora === "string" ? hora.trim() : "",
       observacion: observacionNormalizada,
       fotoUrl: typeof fotoUrl === "string" ? fotoUrl : "",
@@ -991,6 +1495,11 @@ app.get("/api/asistencia/registros", autenticarToken, async (req, res) => {
       return res.status(400).json({ error: "Tipo de asistencia invalido" });
     }
 
+    const motivoFiltro = req.query.motivoSalida ? normalizeMotivoSalida(req.query.motivoSalida) : "";
+    if (req.query.motivoSalida && !motivoFiltro) {
+      return res.status(400).json({ error: "Motivo de permiso invalido" });
+    }
+
     const fechaDesdeDate = fechaDesde ? new Date(`${fechaDesde}T00:00:00`) : null;
     const fechaHastaDate = fechaHasta ? new Date(`${fechaHasta}T23:59:59`) : null;
 
@@ -1002,6 +1511,7 @@ app.get("/api/asistencia/registros", autenticarToken, async (req, res) => {
       (estudiante.historial || []).forEach((registro) => {
         const fechaRegistro = new Date(registro.fecha);
         if (tipoFiltro && normalizeAttendanceType(registro.tipo) !== tipoFiltro) return;
+        if (motivoFiltro && normalizeMotivoSalida(registro.motivoSalida) !== motivoFiltro) return;
         if (fechaDesdeDate && fechaRegistro < fechaDesdeDate) return;
         if (fechaHastaDate && fechaRegistro > fechaHastaDate) return;
 
@@ -1014,6 +1524,7 @@ app.get("/api/asistencia/registros", autenticarToken, async (req, res) => {
           grupo: estudiante.grupo,
           fecha: registro.fecha,
           tipo: normalizeAttendanceType(registro.tipo),
+          motivoSalida: normalizeMotivoSalida(registro.motivoSalida),
           hora: registro.hora || "",
           observacion: registro.observacion || "",
           fotoUrl: registro.fotoUrl || "",
@@ -1037,20 +1548,14 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
 
     const { mes, horaCorte, festivos } = req.query;
     const { monthKey, start, end } = parseMonthRange(mes);
-    const ahora = new Date();
+    const ahora = obtenerAhoraLocal();
     const esMesActual = monthKey === getMonthKey(ahora);
-    const fechaCorteMes = esMesActual && ahora < end ? ahora : end;
+    const finDeHoy = finDelDiaLocal(ahora);
+    const fechaCorteMes = esMesActual && finDeHoy < end ? finDeHoy : end;
     const holidayConfig = parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`);
     const festivosDelMes = listHolidayDayKeys(start, end, holidayConfig);
 
-    const [horaRaw = "12", minutoRaw = "00"] = String(horaCorte || "12:00").split(":");
-    const horaValida = Number(horaRaw);
-    const minutoValido = Number(minutoRaw);
-    const horaCorteMinutos = (
-      Number.isFinite(horaValida) && horaValida >= 0 && horaValida <= 23 ? horaValida : 12
-    ) * 60 + (
-      Number.isFinite(minutoValido) && minutoValido >= 0 && minutoValido <= 59 ? minutoValido : 0
-    );
+    const horaCorteMinutos = parseHoraCorteMinutos(horaCorte);
 
     const profesores = await Usuario.find({ rol: "profesor" })
       .select("nombre username gradoAsignado grupoAsignado")
@@ -1071,12 +1576,12 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
         fechaInicio: start,
         fechaFin: end,
         fechaCorteEvaluada: fechaCorteMes,
-        horaCorte: `${String(Math.floor(horaCorteMinutos / 60)).padStart(2, "0")}:${String(horaCorteMinutos % 60).padStart(2, "0")}`,
+        horaCorte: formatearHoraCorte(horaCorteMinutos),
         hoyEsFestivo,
         festivosConfigurados: holidayConfig.exactDates.size + holidayConfig.recurringMonthDays.size,
         festivosDelMes,
         totalProfesores: 0,
-        alertasMediodia: 0,
+        alertasHoraLimite: 0,
         pendientesMes: 0,
         profesores: []
       });
@@ -1126,7 +1631,8 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
       const diasRegistrados = diasConRegistroPorSalon[llaveSalon] || new Set();
       const diasFaltantes = diasHabilesEsperados.filter((dia) => !diasRegistrados.has(dia));
       const tieneRegistroHoy = diasRegistrados.has(hoyKey);
-      const alertaMediodia = esMesActual && hoyEsHabil && !hoyEsFestivo && !tieneRegistroHoy && minutosActuales >= horaCorteMinutos;
+      const alertaHoraLimite = esMesActual && hoyEsHabil && !hoyEsFestivo && !tieneRegistroHoy && minutosActuales >= horaCorteMinutos;
+      const horaCorteTexto = formatearHoraCorte(horaCorteMinutos);
 
       let estadoHoy = "sin_alerta";
       let mensajeHoy = "No aplica alerta para hoy.";
@@ -1135,11 +1641,11 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
           estadoHoy = "al_dia_hoy";
           mensajeHoy = "Ya registró asistencia del día.";
         } else if (minutosActuales >= horaCorteMinutos) {
-          estadoHoy = "alerta_mediodia";
-          mensajeHoy = "No registró asistencia antes de mediodía.";
+          estadoHoy = "alerta_hora_limite";
+          mensajeHoy = `No registró asistencia antes de las ${horaCorteTexto}.`;
         } else {
           estadoHoy = "pendiente_antes_de_corte";
-          mensajeHoy = "Aún no registra hoy; sigue dentro del horario límite.";
+          mensajeHoy = `Aún no registra hoy; tiene plazo hasta las ${horaCorteTexto}.`;
         }
       } else if (esMesActual && hoyEsFestivo) {
         estadoHoy = "festivo";
@@ -1164,18 +1670,18 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
         cumplimientoPorcentaje: cumplimiento,
         estadoMensual: diasFaltantes.length ? "incompleto" : "al_dia",
         estadoHoy,
-        alertaMediodia,
+        alertaHoraLimite,
         mensajeHoy
       };
     });
 
     items.sort((a, b) => {
-      if (a.alertaMediodia !== b.alertaMediodia) return a.alertaMediodia ? -1 : 1;
+      if (a.alertaHoraLimite !== b.alertaHoraLimite) return a.alertaHoraLimite ? -1 : 1;
       if (a.faltantes !== b.faltantes) return b.faltantes - a.faltantes;
       return a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" });
     });
 
-    const alertasMediodia = items.filter((item) => item.alertaMediodia).length;
+    const alertasHoraLimite = items.filter((item) => item.alertaHoraLimite).length;
     const pendientesMes = items.filter((item) => item.faltantes > 0).length;
 
     return res.json({
@@ -1183,16 +1689,152 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
       fechaInicio: start,
       fechaFin: end,
       fechaCorteEvaluada: fechaCorteMes,
-      horaCorte: `${String(Math.floor(horaCorteMinutos / 60)).padStart(2, "0")}:${String(horaCorteMinutos % 60).padStart(2, "0")}`,
+      horaCorte: formatearHoraCorte(horaCorteMinutos),
       hoyEsFestivo,
       festivosConfigurados: holidayConfig.exactDates.size + holidayConfig.recurringMonthDays.size,
       totalProfesores: items.length,
-      alertasMediodia,
+      alertasHoraLimite,
       pendientesMes,
       profesores: items
     });
   } catch (error) {
     return res.status(500).json({ error: "Error al generar cumplimiento mensual por profesor." });
+  }
+});
+
+// Calendario mensual del salon: que dias ya se subio la asistencia y cuales estan pendientes.
+app.get("/api/asistencia/calendario-salon", autenticarToken, async (req, res) => {
+  try {
+    const { grado, grupo, mes, horaCorte, festivos } = req.query;
+
+    let gradoFinal = normalizeGrade(grado);
+    let grupoFinal = normalizeGroup(grupo);
+
+    const scope = getUserScope(req.user);
+    if (scope) {
+      if (!scope.grado || !scope.grupo) {
+        return res.status(403).json({ error: "Tu usuario no tiene grado/grupo asignado. Contacta al administrador." });
+      }
+      if ((gradoFinal && gradoFinal !== scope.grado) || (grupoFinal && grupoFinal !== scope.grupo)) {
+        return res.status(403).json({ error: "Solo puedes ver el calendario de tu grado y grupo asignado." });
+      }
+      gradoFinal = scope.grado;
+      grupoFinal = scope.grupo;
+    }
+
+    if (!gradoFinal || !grupoFinal) {
+      return res.status(400).json({ error: "Debes indicar grado y grupo para ver el calendario." });
+    }
+
+    const { monthKey, start, end } = parseMonthRange(mes);
+    const ahora = obtenerAhoraLocal();
+    const hoyKey = getDateKey(ahora);
+    const esMesActual = monthKey === getMonthKey(ahora);
+    const finDeHoy = finDelDiaLocal(ahora);
+    const fechaCorteMes = esMesActual && finDeHoy < end ? finDeHoy : end;
+    const fechaCorteKey = getDateKey(fechaCorteMes);
+
+    const holidayConfig = parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`);
+    const horaCorteMinutos = parseHoraCorteMinutos(horaCorte);
+    const minutosActuales = (ahora.getUTCHours() * 60) + ahora.getUTCMinutes();
+
+    const estudiantes = await Estudiante.find({ grado: gradoFinal, grupo: grupoFinal })
+      .select("historial")
+      .lean();
+
+    // Por cada dia: cuantos registros hay y a cuantos estudiantes distintos cubren.
+    const registrosPorDia = new Map();
+    estudiantes.forEach((estudiante) => {
+      (estudiante.historial || []).forEach((registro) => {
+        const fechaRegistro = new Date(registro.fecha);
+        if (Number.isNaN(fechaRegistro.getTime())) return;
+        if (fechaRegistro < start || fechaRegistro > end) return;
+        const dayKey = getDateKey(fechaRegistro);
+        if (!dayKey) return;
+        if (!registrosPorDia.has(dayKey)) {
+          registrosPorDia.set(dayKey, { registros: 0, estudiantes: new Set() });
+        }
+        const detalle = registrosPorDia.get(dayKey);
+        detalle.registros += 1;
+        detalle.estudiantes.add(String(estudiante._id));
+      });
+    });
+
+    const totalDias = new Date(Date.UTC(
+      start.getUTCFullYear(),
+      start.getUTCMonth() + 1,
+      0
+    )).getUTCDate();
+
+    const dias = [];
+    for (let numeroDia = 1; numeroDia <= totalDias; numeroDia++) {
+      const fechaDia = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), numeroDia));
+      const dayKey = getDateKey(fechaDia);
+      const diaSemana = fechaDia.getUTCDay();
+      const esFinDeSemana = diaSemana === 0 || diaSemana === 6;
+      const esFestivo = isHolidayDay(dayKey, holidayConfig);
+      const detalle = registrosPorDia.get(dayKey);
+      const tieneRegistro = Boolean(detalle);
+
+      let estado;
+      if (esFestivo) {
+        estado = "festivo";
+      } else if (esFinDeSemana) {
+        estado = "fin_de_semana";
+      } else if (tieneRegistro) {
+        estado = "registrado";
+      } else if (dayKey > fechaCorteKey) {
+        estado = "futuro";
+      } else if (dayKey === hoyKey && minutosActuales < horaCorteMinutos) {
+        estado = "pendiente_hoy";
+      } else {
+        estado = "faltante";
+      }
+
+      dias.push({
+        fecha: dayKey,
+        dia: numeroDia,
+        diaSemana,
+        estado,
+        esHoy: dayKey === hoyKey,
+        registros: detalle ? detalle.registros : 0,
+        estudiantesRegistrados: detalle ? detalle.estudiantes.size : 0
+      });
+    }
+
+    const diasHabiles = dias.filter((dia) => ["registrado", "faltante", "pendiente_hoy"].includes(dia.estado));
+    const diasRegistrados = dias.filter((dia) => dia.estado === "registrado");
+    const diasFaltantes = dias.filter((dia) => dia.estado === "faltante");
+    const cumplimiento = diasHabiles.length
+      ? Math.round((diasRegistrados.length / diasHabiles.length) * 100)
+      : 100;
+
+    const diaHoy = dias.find((dia) => dia.fecha === hoyKey) || null;
+
+    return res.json({
+      grado: gradoFinal,
+      grupo: grupoFinal,
+      mes: monthKey,
+      horaCorte: formatearHoraCorte(horaCorteMinutos),
+      totalEstudiantes: estudiantes.length,
+      dias,
+      diasHabiles: diasHabiles.length,
+      diasRegistrados: diasRegistrados.length,
+      diasFaltantes: diasFaltantes.map((dia) => dia.fecha),
+      cumplimientoPorcentaje: cumplimiento,
+      hoy: esMesActual && diaHoy
+        ? {
+          fecha: diaHoy.fecha,
+          estado: diaHoy.estado,
+          yaVencioElPlazo: minutosActuales >= horaCorteMinutos,
+          registros: diaHoy.registros,
+          estudiantesRegistrados: diaHoy.estudiantesRegistrados
+        }
+        : null
+    });
+  } catch (error) {
+    logger.error(`Error al generar calendario del salón: ${error.message}`);
+    return res.status(500).json({ error: "Error al generar el calendario del salón" });
   }
 });
 
@@ -1212,12 +1854,12 @@ app.put("/api/asistencia/:estudianteId/:registroId", autenticarToken, async (req
       return res.status(404).json({ error: "Registro de asistencia no encontrado" });
     }
 
-    const { fecha, tipo, hora, observacion, fotoUrl } = req.body;
+    const { fecha, tipo, hora, observacion, fotoUrl, motivoSalida } = req.body;
 
     let fechaFinal = registro.fecha;
     if (typeof fecha === "string" && fecha.trim()) {
-      const fechaRegistro = new Date(fecha);
-      if (Number.isNaN(fechaRegistro.getTime())) {
+      const fechaRegistro = normalizarFechaAsistencia(fecha);
+      if (!fechaRegistro) {
         return res.status(400).json({ error: "Fecha de asistencia invalida" });
       }
       fechaFinal = fechaRegistro;
@@ -1235,6 +1877,16 @@ app.put("/api/asistencia/:estudianteId/:registroId", autenticarToken, async (req
       return res.status(400).json({ error: "La observación es obligatoria para registrar un permiso." });
     }
 
+    let motivoFinal = "";
+    if (tipoFinal === "salida") {
+      motivoFinal = typeof motivoSalida === "string" && motivoSalida.trim()
+        ? normalizeMotivoSalida(motivoSalida)
+        : normalizeMotivoSalida(registro.motivoSalida);
+      if (!motivoFinal) {
+        return res.status(400).json({ error: "Debes indicar el motivo del permiso (deportivo, enfermedad, cita médica, familiar u otro)." });
+      }
+    }
+
     const horaFinal = typeof hora === "string" ? hora.trim() : (registro.hora || "");
     const fotoUrlFinal = typeof fotoUrl === "string" ? fotoUrl : (registro.fotoUrl || "");
 
@@ -1249,6 +1901,7 @@ app.put("/api/asistencia/:estudianteId/:registroId", autenticarToken, async (req
 
     registro.fecha = fechaFinal;
     registro.tipo = tipoFinal;
+    registro.motivoSalida = motivoFinal;
     registro.hora = horaFinal;
     registro.observacion = observacionFinal;
     registro.fotoUrl = fotoUrlFinal;
@@ -1542,6 +2195,20 @@ app.delete("/api/convivencia/reportes/:estudianteId/:reporteId", autenticarToken
   }
 });
 
+function contarSalidasPorMotivo(historial = []) {
+  const conteo = MOTIVOS_SALIDA.reduce((acc, motivo) => ({ ...acc, [motivo]: 0 }), { sin_especificar: 0 });
+  historial.forEach((registro) => {
+    if (normalizeAttendanceType(registro.tipo) !== "salida") return;
+    const motivo = normalizeMotivoSalida(registro.motivoSalida);
+    if (motivo) {
+      conteo[motivo] += 1;
+    } else {
+      conteo.sin_especificar += 1;
+    }
+  });
+  return conteo;
+}
+
 function construirResumenAsistencia(historial) {
   const ahora = new Date();
   const fechaCorte30 = new Date(ahora);
@@ -1565,13 +2232,15 @@ function construirResumenAsistencia(historial) {
     faltas,
     retardos,
     salidas,
+    salidasPorMotivo: contarSalidasPorMotivo(historial),
     ultimoRegistro: historial[0] || null,
     ultimos30dias: {
       total: ultimos30dias.length,
       presentes: presentes30,
       faltas: faltas30,
       retardos: retardos30,
-      salidas: salidas30
+      salidas: salidas30,
+      salidasPorMotivo: contarSalidasPorMotivo(ultimos30dias)
     }
   };
 }
@@ -1813,6 +2482,10 @@ app.get("/api/reportes/estadisticas", autenticarToken, async (req, res) => {
     let totalSalidas = 0;
     let totalPresentes = 0;
     let totalRegistros = 0;
+    const salidasPorMotivo = MOTIVOS_SALIDA.reduce(
+      (acc, motivo) => ({ ...acc, [motivo]: 0 }),
+      { sin_especificar: 0 }
+    );
 
     estudiantes.forEach(estudiante => {
       const historialFiltrado = estudiante.historial.filter(h => {
@@ -1828,6 +2501,11 @@ app.get("/api/reportes/estadisticas", autenticarToken, async (req, res) => {
       totalRetardos += historialFiltrado.filter(h => h.tipo === "retardo").length;
       totalSalidas += historialFiltrado.filter(h => h.tipo === "salida").length;
       totalRegistros += historialFiltrado.length;
+
+      const conteoMotivos = contarSalidasPorMotivo(historialFiltrado);
+      Object.keys(salidasPorMotivo).forEach((motivo) => {
+        salidasPorMotivo[motivo] += conteoMotivos[motivo] || 0;
+      });
     });
 
     res.json({
@@ -1836,6 +2514,7 @@ app.get("/api/reportes/estadisticas", autenticarToken, async (req, res) => {
       totalFaltas,
       totalRetardos,
       totalSalidas,
+      salidasPorMotivo,
       totalRegistros
     });
   } catch (error) {

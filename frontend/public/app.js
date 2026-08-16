@@ -21,6 +21,11 @@ let cumplimientoProfesoresActual = [];
 let cumplimientoContextActual = null;
 let registroAsistenciaEditando = { registroId: "", estudianteId: "" };
 let toastTimeoutId = null;
+let mesCalendarioSalon = "";
+let calendarioSalonActual = null;
+let aniosLectivosData = null;
+let archivoEstudiantesActual = [];
+let archivoAnioActual = "";
 
 function normalizarTexto(value) {
   return String(value ?? "").replace(/\u00C2/g, "").trim();
@@ -48,6 +53,38 @@ function formatearTipoAsistencia(tipo) {
   if (value === "falta") return "Falta";
   if (value === "retardo") return "Retardo";
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : "-";
+}
+
+const MOTIVOS_SALIDA = [
+  { valor: "deportivo", etiqueta: "Deportivo", clase: "bg-blue-100 text-blue-800" },
+  { valor: "enfermedad", etiqueta: "Enfermedad", clase: "bg-red-100 text-red-800" },
+  { valor: "cita_medica", etiqueta: "Cita médica", clase: "bg-teal-100 text-teal-800" },
+  { valor: "familiar", etiqueta: "Familiar", clase: "bg-amber-100 text-amber-800" },
+  { valor: "otro", etiqueta: "Otro", clase: "bg-slate-100 text-slate-700" }
+];
+
+function formatearMotivoSalida(motivo) {
+  const encontrado = MOTIVOS_SALIDA.find((item) => item.valor === String(motivo || "").toLowerCase());
+  return encontrado ? encontrado.etiqueta : "Sin especificar";
+}
+
+function obtenerClaseMotivoSalida(motivo) {
+  const encontrado = MOTIVOS_SALIDA.find((item) => item.valor === String(motivo || "").toLowerCase());
+  return encontrado ? encontrado.clase : "bg-slate-100 text-slate-500";
+}
+
+function construirOpcionesMotivoSalida(seleccionado = "") {
+  const opciones = MOTIVOS_SALIDA
+    .map((item) => `<option value="${item.valor}"${item.valor === seleccionado ? " selected" : ""}>${item.etiqueta}</option>`)
+    .join("");
+  return `<option value="">Motivo...</option>${opciones}`;
+}
+
+// Etiqueta corta para mostrar junto al tipo de registro.
+function formatearTipoConMotivo(tipo, motivoSalida) {
+  const etiquetaTipo = formatearTipoAsistencia(tipo);
+  if (String(tipo || "").toLowerCase() !== "salida") return etiquetaTipo;
+  return `${etiquetaTipo} · ${formatearMotivoSalida(motivoSalida)}`;
 }
 
 function normalizarGravedadConvivencia(gravedad) {
@@ -131,6 +168,9 @@ function inicializarEventos() {
 
   // Usuarios
   setupUsuarios();
+
+  // Año lectivo
+  setupAnioLectivo();
 }
 
 function leerJsonSeguro(response) {
@@ -215,6 +255,15 @@ function mostrarApp() {
       tabUsuarios.classList.remove("hidden");
     } else {
       tabUsuarios.classList.add("hidden");
+    }
+  }
+
+  const tabAnioLectivo = document.getElementById("tab-anio-lectivo");
+  if (tabAnioLectivo) {
+    if (usuarioActual?.rol === "admin") {
+      tabAnioLectivo.classList.remove("hidden");
+    } else {
+      tabAnioLectivo.classList.add("hidden");
     }
   }
 
@@ -377,6 +426,8 @@ function cambiarVista(vista) {
     cargarCumplimientoProfesores();
   } else if (vista === "usuarios") {
     cargarUsuarios();
+  } else if (vista === "anio-lectivo") {
+    cargarAniosLectivos();
   }
 }
 
@@ -394,7 +445,11 @@ function setupAsistencia() {
   if (fechaInput && !fechaInput.value) {
     fechaInput.value = obtenerFechaHoy();
   }
-  
+
+  const tipoSelect = document.getElementById("tipo");
+  tipoSelect.addEventListener("change", actualizarVisibilidadMotivoSalida);
+  actualizarVisibilidadMotivoSalida();
+
   buscador.addEventListener("input", (event) => {
     const query = event.target.value.toLowerCase();
     estudianteSeleccionado = null;
@@ -461,30 +516,53 @@ function setupAsistencia() {
     const tipo = document.getElementById("tipo").value;
     const fecha = document.getElementById("fecha-asistencia").value;
     const observacion = document.getElementById("observacion").value.trim();
+    const motivoSalida = document.getElementById("motivo-salida").value;
     const fotoUrl = previewImg.src || "";
 
     if (tipo === "salida" && !observacion) {
       mostrarEstado("La observación es obligatoria para registrar un permiso.", "red");
       return;
     }
-    
+
+    if (tipo === "salida" && !motivoSalida) {
+      mostrarEstado("Selecciona el motivo del permiso (deportivo, enfermedad, cita médica, familiar u otro).", "red");
+      return;
+    }
+
     try {
       await registrarAsistencia({
         estudianteId: estudianteSeleccionado._id,
         fecha: construirFechaAsistenciaISO(fecha),
         tipo,
+        motivoSalida,
         observacion,
         fotoUrl
       });
-      
+
       mostrarEstado("Registro de asistencia guardado correctamente.", "green");
       form.reset();
+      actualizarVisibilidadMotivoSalida();
       preview.classList.add("hidden");
       previewImg.src = "";
     } catch (error) {
       mostrarEstado(error.message, "red");
     }
   });
+}
+
+// El motivo solo se pide cuando el registro es un permiso de salida.
+function actualizarVisibilidadMotivoSalida() {
+  const tipo = document.getElementById("tipo")?.value;
+  const bloque = document.getElementById("bloque-motivo-salida");
+  const select = document.getElementById("motivo-salida");
+  if (!bloque || !select) return;
+
+  if (tipo === "salida") {
+    bloque.classList.remove("hidden");
+  } else {
+    bloque.classList.add("hidden");
+    select.value = "";
+  }
 }
 
 async function registrarAsistencia(payload) {
@@ -561,8 +639,14 @@ function setupSalones() {
   tipoGeneral.addEventListener("change", (event) => {
     document.querySelectorAll("#tabla-salon .salon-tipo").forEach((select) => {
       select.value = event.target.value;
+      const fila = select.closest("tr");
+      if (fila) actualizarMotivoFilaSalon(fila);
     });
   });
+
+  document.getElementById("btn-cal-mes-anterior").addEventListener("click", () => cambiarMesCalendarioSalon(-1));
+  document.getElementById("btn-cal-mes-siguiente").addEventListener("click", () => cambiarMesCalendarioSalon(1));
+  document.getElementById("btn-cerrar-cal-detalle").addEventListener("click", cerrarDetalleDiaCalendario);
 }
 
 function actualizarSelectoresSalon() {
@@ -630,6 +714,8 @@ async function cargarEstudiantesSalon() {
     seleccionarTodos.checked = false;
     salonVacio.classList.add("hidden");
     salonContent.classList.remove("hidden");
+    mesCalendarioSalon = obtenerMesActual();
+    cargarCalendarioSalon();
 
     if (estudiantesSalon.length === 0) {
       mostrarEstadoSalon("Este grado/grupo no tiene estudiantes registrados.", "yellow");
@@ -648,7 +734,7 @@ function renderTablaSalon(lista) {
   tbody.innerHTML = "";
 
   if (!lista.length) {
-    tbody.innerHTML = "<tr><td colspan='5' class='px-4 py-4 text-center text-slate-500'>No hay estudiantes en este salon.</td></tr>";
+    tbody.innerHTML = "<tr><td colspan='6' class='px-4 py-4 text-center text-slate-500'>No hay estudiantes en este salon.</td></tr>";
     return;
   }
 
@@ -670,6 +756,12 @@ function renderTablaSalon(lista) {
           <option value="salida">Permiso</option>
         </select>
       </td>
+      <td class="px-4 py-2 text-center">
+        <select class="salon-motivo border border-slate-300 rounded-lg px-2 py-1 hidden">
+          ${construirOpcionesMotivoSalida()}
+        </select>
+        <span class="salon-motivo-vacio text-xs text-slate-400">-</span>
+      </td>
       <td class="px-4 py-2">
         <input type="text" class="salon-observacion w-full border border-slate-300 rounded-lg px-3 py-1" placeholder="Observacion (opcional)">
       </td>
@@ -679,8 +771,26 @@ function renderTablaSalon(lista) {
     const checkbox = tr.querySelector(".salon-check");
     const tipo = tr.querySelector(".salon-tipo");
     tipo.value = tipoPorDefecto;
+    tipo.addEventListener("change", () => actualizarMotivoFilaSalon(tr));
+    actualizarMotivoFilaSalon(tr);
     checkbox.addEventListener("change", sincronizarCheckboxGeneralSalon);
   });
+}
+
+function actualizarMotivoFilaSalon(fila) {
+  const tipo = fila.querySelector(".salon-tipo")?.value;
+  const motivo = fila.querySelector(".salon-motivo");
+  const vacio = fila.querySelector(".salon-motivo-vacio");
+  if (!motivo || !vacio) return;
+
+  if (tipo === "salida") {
+    motivo.classList.remove("hidden");
+    vacio.classList.add("hidden");
+  } else {
+    motivo.classList.add("hidden");
+    motivo.value = "";
+    vacio.classList.remove("hidden");
+  }
 }
 
 function sincronizarCheckboxGeneralSalon() {
@@ -712,6 +822,8 @@ async function registrarAsistenciaSalon(registrarTodos) {
   const fechaSeleccionada = document.getElementById("salon-fecha").value;
   const fecha = construirFechaAsistenciaISO(fechaSeleccionada);
 
+  const nombreDeFila = (fila) => fila.querySelector("td:nth-child(2)")?.textContent?.trim() || "sin nombre";
+
   const filaSinObservacionSalida = filasObjetivo.find((fila) => {
     const tipo = fila.querySelector(".salon-tipo").value;
     const observacion = fila.querySelector(".salon-observacion").value.trim();
@@ -719,19 +831,31 @@ async function registrarAsistenciaSalon(registrarTodos) {
   });
 
   if (filaSinObservacionSalida) {
-    const nombreEstudiante = filaSinObservacionSalida.querySelector("td:nth-child(2)")?.textContent?.trim() || "sin nombre";
-    mostrarEstadoSalon(`Agrega una observación para el permiso de ${nombreEstudiante}.`, "red");
+    mostrarEstadoSalon(`Agrega una observación para el permiso de ${nombreDeFila(filaSinObservacionSalida)}.`, "red");
+    return;
+  }
+
+  const filaSinMotivoSalida = filasObjetivo.find((fila) => {
+    const tipo = fila.querySelector(".salon-tipo").value;
+    const motivo = fila.querySelector(".salon-motivo")?.value || "";
+    return tipo === "salida" && !motivo;
+  });
+
+  if (filaSinMotivoSalida) {
+    mostrarEstadoSalon(`Selecciona el motivo del permiso de ${nombreDeFila(filaSinMotivoSalida)}.`, "red");
     return;
   }
 
   const peticiones = filasObjetivo.map((fila) => {
     const tipo = fila.querySelector(".salon-tipo").value;
     const observacion = fila.querySelector(".salon-observacion").value.trim();
+    const motivoSalida = fila.querySelector(".salon-motivo")?.value || "";
 
     return registrarAsistencia({
       estudianteId: fila.dataset.estudianteId,
       fecha,
       tipo,
+      motivoSalida,
       observacion,
       fotoUrl: ""
     });
@@ -750,6 +874,11 @@ async function registrarAsistenciaSalon(registrarTodos) {
 
   sincronizarCheckboxGeneralSalon();
 
+  // El calendario debe reflejar de una vez que el dia ya quedo registrado.
+  if (exitosos) {
+    cargarCalendarioSalon();
+  }
+
   if (exitosos && !fallidos) {
     mostrarEstadoSalon(`Registro(s) de asistencia guardado(s): ${exitosos}.`, "green");
     return;
@@ -765,6 +894,185 @@ async function registrarAsistenciaSalon(registrarTodos) {
   const primerError = resultados.find((resultado) => resultado.status === "rejected");
   const detalle = primerError?.reason?.message || "No se pudo registrar asistencia.";
   mostrarEstadoSalon(detalle, "red");
+}
+
+// ==================== CALENDARIO DEL SALON ====================
+function cambiarMesCalendarioSalon(delta) {
+  const [anio, mes] = (mesCalendarioSalon || obtenerMesActual()).split("-").map(Number);
+  const nuevaFecha = new Date(anio, (mes - 1) + delta, 1);
+  mesCalendarioSalon = `${nuevaFecha.getFullYear()}-${String(nuevaFecha.getMonth() + 1).padStart(2, "0")}`;
+  cerrarDetalleDiaCalendario();
+  cargarCalendarioSalon();
+}
+
+async function cargarCalendarioSalon() {
+  const card = document.getElementById("salon-calendario-card");
+  if (!card) return;
+
+  if (!salonActual.grado || !salonActual.grupo) {
+    card.classList.add("hidden");
+    return;
+  }
+
+  const params = new URLSearchParams({
+    grado: salonActual.grado,
+    grupo: salonActual.grupo,
+    mes: mesCalendarioSalon || obtenerMesActual()
+  });
+
+  try {
+    const response = await fetch(`${API_URL}/asistencia/calendario-salon?${params.toString()}`, {
+      headers: getHeaders()
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo cargar el calendario del salón.");
+    }
+
+    calendarioSalonActual = data;
+    renderCalendarioSalon(data);
+    card.classList.remove("hidden");
+  } catch (error) {
+    card.classList.add("hidden");
+    console.error("Error al cargar calendario del salón:", error);
+  }
+}
+
+function renderCalendarioSalon(data) {
+  const contenedor = document.getElementById("salon-cal-dias");
+  const tituloMes = document.getElementById("salon-cal-mes");
+  const subtitulo = document.getElementById("salon-cal-subtitulo");
+  if (!contenedor) return;
+
+  const [anioTexto, mesTexto] = String(data.mes || obtenerMesActual()).split("-");
+  const mesIndice = Number(mesTexto) - 1;
+  if (tituloMes) tituloMes.textContent = `${MESES_NOMBRES_CALENDARIO[mesIndice] || ""} ${anioTexto}`;
+  if (subtitulo) {
+    subtitulo.textContent = `${formatearGrado(data.grado)} ${data.grupo} · hasta las ${data.horaCorte}`;
+  }
+
+  contenedor.innerHTML = "";
+
+  // Los dias arrancan en lunes, igual que el calendario de papel.
+  const primerDia = new Date(Number(anioTexto), mesIndice, 1).getDay();
+  const relleno = (primerDia + 6) % 7;
+  for (let i = 0; i < relleno; i++) {
+    const vacio = document.createElement("div");
+    vacio.className = "aspect-square border-r border-b border-slate-200 bg-slate-50";
+    contenedor.appendChild(vacio);
+  }
+
+  (data.dias || []).forEach((dia) => {
+    const celda = document.createElement("button");
+    celda.type = "button";
+    celda.className = `aspect-square border-r border-b border-slate-200 flex flex-col items-center justify-center gap-0.5 ${obtenerEstiloDiaCalendario(dia)}`;
+    if (dia.esHoy) {
+      celda.classList.add("ring-2", "ring-inset", "ring-blue-700");
+    }
+    celda.innerHTML = `
+      <span class="text-[13px] ${dia.esHoy ? "font-bold" : "font-medium"}">${dia.dia}</span>
+      ${obtenerIconoDiaCalendario(dia)}
+    `;
+    celda.addEventListener("click", () => abrirDetalleDiaCalendario(dia));
+    contenedor.appendChild(celda);
+  });
+
+  renderResumenCalendarioSalon(data);
+}
+
+function obtenerEstiloDiaCalendario(dia) {
+  if (dia.estado === "festivo") return "bg-amber-300 text-amber-900";
+  if (dia.estado === "fin_de_semana") return "bg-slate-200 text-slate-500";
+  if (dia.estado === "registrado") return "bg-green-500 text-white";
+  if (dia.estado === "faltante") return "bg-red-500 text-white";
+  if (dia.estado === "pendiente_hoy") return "bg-blue-400 text-white";
+  return "bg-white text-slate-400";
+}
+
+function obtenerIconoDiaCalendario(dia) {
+  if (dia.estado === "registrado") return '<i class="fas fa-check text-[10px]"></i>';
+  if (dia.estado === "faltante") return '<i class="fas fa-xmark text-[10px]"></i>';
+  if (dia.estado === "pendiente_hoy") return '<i class="fas fa-clock text-[10px]"></i>';
+  return "";
+}
+
+function renderResumenCalendarioSalon(data) {
+  const contenedor = document.getElementById("salon-cal-resumen");
+  if (!contenedor) return;
+
+  const faltantes = (data.diasFaltantes || []).length;
+  const hoy = data.hoy;
+
+  let tarjetaHoy = `
+    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <p class="text-xs uppercase font-semibold text-slate-500">Hoy</p>
+      <p class="text-lg font-bold text-slate-700">Sin novedad</p>
+      <p class="text-sm text-slate-600">Este mes no incluye el día de hoy.</p>
+    </div>`;
+
+  if (hoy) {
+    const estilos = {
+      registrado: ["border-green-300 bg-green-50", "text-green-800", "Asistencia enviada", `${hoy.estudiantesRegistrados} estudiante(s) registrados hoy.`],
+      pendiente_hoy: ["border-blue-300 bg-blue-50", "text-blue-800", "Pendiente", `Tienes plazo hasta las ${data.horaCorte} para subir la asistencia.`],
+      faltante: ["border-red-300 bg-red-50", "text-red-800", "Vencido", `Se pasó de las ${data.horaCorte} y hoy no se ha registrado asistencia.`],
+      festivo: ["border-amber-300 bg-amber-50", "text-amber-800", "Festivo", "Hoy es festivo, no hay que registrar."],
+      fin_de_semana: ["border-slate-200 bg-slate-50", "text-slate-700", "Fin de semana", "Hoy no hay clases."]
+    };
+    const [borde, texto, titulo, detalle] = estilos[hoy.estado] || estilos.fin_de_semana;
+    tarjetaHoy = `
+      <div class="rounded-lg border ${borde} p-4">
+        <p class="text-xs uppercase font-semibold ${texto}">Hoy</p>
+        <p class="text-lg font-bold ${texto}">${titulo}</p>
+        <p class="text-sm text-slate-600">${detalle}</p>
+      </div>`;
+  }
+
+  contenedor.innerHTML = `
+    ${tarjetaHoy}
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <p class="text-xs uppercase font-semibold text-slate-500">Cumplimiento del mes</p>
+      <p class="text-3xl font-bold ${data.cumplimientoPorcentaje >= 100 ? "text-green-600" : "text-slate-800"}">${data.cumplimientoPorcentaje}%</p>
+      <p class="text-sm text-slate-600">${data.diasRegistrados} de ${data.diasHabiles} día(s) de clase registrados.</p>
+      ${faltantes ? `<p class="text-sm text-red-700 mt-1">Faltan ${faltantes} día(s) por subir.</p>` : '<p class="text-sm text-green-700 mt-1">No hay días pendientes.</p>'}
+    </div>
+  `;
+}
+
+function abrirDetalleDiaCalendario(dia) {
+  const panel = document.getElementById("salon-cal-detalle");
+  const fecha = document.getElementById("salon-cal-detalle-fecha");
+  const tag = document.getElementById("salon-cal-detalle-tag");
+  const texto = document.getElementById("salon-cal-detalle-texto");
+  if (!panel) return;
+
+  const horaCorte = calendarioSalonActual?.horaCorte || "16:00";
+  const detalles = {
+    registrado: ["bg-green-100 text-green-800", "Registrada", `Se registró la asistencia de ${dia.estudiantesRegistrados} estudiante(s), ${dia.registros} registro(s) en total.`],
+    faltante: ["bg-red-100 text-red-800", "Sin registrar", `Este día de clase no tiene asistencia registrada. El plazo era hasta las ${horaCorte}.`],
+    pendiente_hoy: ["bg-blue-100 text-blue-800", "Pendiente", `Todavía no se registra la asistencia de hoy. Hay plazo hasta las ${horaCorte}.`],
+    festivo: ["bg-amber-100 text-amber-800", "Festivo", "Día festivo: no se exige registro."],
+    fin_de_semana: ["bg-slate-200 text-slate-700", "Fin de semana", "No hay clases este día."],
+    futuro: ["bg-slate-100 text-slate-600", "Aún no llega", "Este día todavía no ha llegado."]
+  };
+  const [claseTag, etiqueta, descripcion] = detalles[dia.estado] || detalles.futuro;
+
+  if (fecha) {
+    fecha.textContent = new Date(`${dia.fecha}T00:00:00`).toLocaleDateString("es-CO", {
+      day: "numeric", month: "long", year: "numeric"
+    });
+  }
+  if (tag) {
+    tag.textContent = etiqueta;
+    tag.className = `inline-block text-xs font-semibold px-2 py-1 rounded mb-2 ${claseTag}`;
+  }
+  if (texto) texto.textContent = descripcion;
+
+  panel.classList.remove("hidden");
+}
+
+function cerrarDetalleDiaCalendario() {
+  document.getElementById("salon-cal-detalle")?.classList.add("hidden");
 }
 
 function mostrarEstadoSalon(mensaje, color) {
@@ -804,17 +1112,11 @@ function obtenerRangoMes(mesTexto) {
   return { inicio, fin };
 }
 
+// Se ancla al mediodia UTC para que el dia registrado sea el mismo sin importar
+// la zona horaria configurada en el equipo del profesor.
 function construirFechaAsistenciaISO(fecha) {
-  if (!fecha) {
-    return new Date().toISOString();
-  }
-
-  const fechaLocal = new Date(`${fecha}T00:00:00`);
-  if (!Number.isNaN(fechaLocal.getTime())) {
-    return fechaLocal.toISOString();
-  }
-
-  return new Date().toISOString();
+  const dia = /^\d{4}-\d{2}-\d{2}$/.test(String(fecha || "")) ? fecha : obtenerFechaHoy();
+  return `${dia}T12:00:00.000Z`;
 }
 
 // ==================== ESTUDIANTES ====================
@@ -1683,7 +1985,7 @@ async function buscarPerfil(id) {
                 : "text-purple-600";
         tr.innerHTML = `
           <td class="px-4 py-2">${new Date(h.fecha).toLocaleDateString()}</td>
-          <td class="px-4 py-2 font-medium ${tipoColor}">${formatearTipoAsistencia(h.tipo)}</td>
+          <td class="px-4 py-2 font-medium ${tipoColor}">${formatearTipoConMotivo(h.tipo, h.motivoSalida)}</td>
           <td class="px-4 py-2">${h.observacion || "-"}</td>
           <td class="px-4 py-2 text-sm text-slate-500">${h.registradoPor || "-"}</td>
         `;
@@ -1719,6 +2021,7 @@ function renderResumenAsistenciaPerfil(resumen) {
     <p><strong>Faltas:</strong> ${resumen.faltas ?? 0}</p>
     <p><strong>Retardos:</strong> ${resumen.retardos ?? 0}</p>
     <p><strong>Permisos:</strong> ${resumen.salidas ?? 0}</p>
+    ${construirDesglosePermisosHTML(resumen.salidasPorMotivo)}
     <p><strong>Ultimo registro:</strong> ${ultimo}</p>
     <div class="mt-3 pt-3 border-t border-slate-200">
       <p class="font-medium">Ultimos 30 dias</p>
@@ -1729,6 +2032,21 @@ function renderResumenAsistenciaPerfil(resumen) {
       <p>Permisos: ${resumen.ultimos30dias?.salidas ?? 0}</p>
     </div>
   `;
+}
+
+// Muestra los permisos separados por motivo; se omite si el estudiante no tiene permisos.
+function construirDesglosePermisosHTML(salidasPorMotivo) {
+  const datos = salidasPorMotivo || {};
+  const etiquetas = MOTIVOS_SALIDA
+    .filter((motivo) => (datos[motivo.valor] ?? 0) > 0)
+    .map((motivo) => `<span class="inline-block text-xs px-2 py-0.5 rounded ${motivo.clase}">${motivo.etiqueta}: ${datos[motivo.valor]}</span>`);
+
+  if (datos.sin_especificar) {
+    etiquetas.push(`<span class="inline-block text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500">Sin especificar: ${datos.sin_especificar}</span>`);
+  }
+
+  if (!etiquetas.length) return "";
+  return `<div class="flex flex-wrap gap-1 ml-4 mb-1">${etiquetas.join("")}</div>`;
 }
 
 function renderReporteConvivenciaPerfil(reporte) {
@@ -2055,6 +2373,8 @@ function setupReportes() {
   document.getElementById("reportes-conv-grado").addEventListener("change", cargarReportesConvivenciaGestion);
   document.getElementById("reportes-conv-grupo").addEventListener("change", cargarReportesConvivenciaGestion);
   document.getElementById("reportes-conv-estado-filtro").addEventListener("change", cargarReportesConvivenciaGestion);
+  document.getElementById("reportes-conv-motivo-filtro").addEventListener("change", cargarReportesConvivenciaGestion);
+  document.getElementById("edit-rep-tipo").addEventListener("change", actualizarVisibilidadMotivoEdicion);
   document.getElementById("reportes-conv-fecha-mes").addEventListener("change", () => {
     const fechaDiaInput = document.getElementById("reportes-conv-fecha-dia");
     if (fechaDiaInput) fechaDiaInput.value = "";
@@ -2107,7 +2427,7 @@ function actualizarResumenAlertasProfesores(data = null) {
     summary.textContent = "Seguimiento por profesor";
     return;
   }
-  const alertas = Number(data.alertasMediodia || 0);
+  const alertas = Number(data.alertasHoraLimite || 0);
   const pendientes = Number(data.pendientesMes || 0);
   summary.textContent = `Seguimiento por profesor (${alertas} alertas, ${pendientes} pendientes)`;
 }
@@ -2124,10 +2444,10 @@ function renderCumplimientoProfesores(items) {
 
   items.forEach((item) => {
     const card = document.createElement("details");
-    const claseEstado = item.alertaMediodia
+    const claseEstado = item.alertaHoraLimite
       ? "border-red-300 bg-red-50"
       : (item.faltantes > 0 ? "border-yellow-300 bg-yellow-50" : "border-green-300 bg-green-50");
-    const etiquetaEstado = item.alertaMediodia
+    const etiquetaEstado = item.alertaHoraLimite
       ? "ALERTA"
       : (item.faltantes > 0 ? "Pendiente" : "Al dia");
     const diasFaltantes = (item.diasFaltantes || []).join(", ");
@@ -2146,7 +2466,7 @@ function renderCumplimientoProfesores(items) {
       </summary>
       <div class="px-3 pb-3 pt-1 border-t border-slate-200">
         <p class="text-sm text-slate-700">Cumplimiento mensual: ${item.cumplimientoPorcentaje ?? 0}% (${item.diasReportados ?? 0}/${item.diasHabilesEsperados ?? 0} días hábiles reportados)</p>
-        <p class="text-sm ${item.alertaMediodia ? "text-red-700 font-semibold" : "text-slate-700"}">${item.mensajeHoy || "Sin novedades para hoy."}</p>
+        <p class="text-sm ${item.alertaHoraLimite ? "text-red-700 font-semibold" : "text-slate-700"}">${item.mensajeHoy || "Sin novedades para hoy."}</p>
         <p class="text-sm text-slate-700">${faltantesTexto}</p>
         <button type="button" data-profesor-id="${item.profesorId}" class="btn-ver-calendario-profesor mt-2 text-xs bg-slate-700 text-white px-3 py-1.5 rounded-lg hover:bg-slate-800">
           <i class="fas fa-calendar-days"></i> Ver calendario
@@ -2192,8 +2512,8 @@ async function cargarCumplimientoProfesores() {
     renderCumplimientoProfesores(cumplimientoProfesoresActual);
     actualizarResumenAlertasProfesores(data);
     mostrarEstadoAlertasProfesores(
-      `Mes ${data.mes || mes}: ${data.alertasMediodia ?? 0} alerta(s) de mediodía, ${data.pendientesMes ?? 0} profesor(es) con faltantes.`,
-      (data.alertasMediodia || 0) > 0 ? "red" : "amber"
+      `Mes ${data.mes || mes}: ${data.alertasHoraLimite ?? 0} alerta(s) por hora límite, ${data.pendientesMes ?? 0} profesor(es) con faltantes.`,
+      (data.alertasHoraLimite || 0) > 0 ? "red" : "amber"
     );
   } catch (error) {
     cumplimientoProfesoresActual = [];
@@ -2407,7 +2727,7 @@ function renderTablaReportesConvivenciaGestion(reportes) {
         <tr class="border-b hover:bg-slate-50">
           ${ocultarFecha ? "" : `<td class="px-4 py-2">${r.fecha ? new Date(r.fecha).toLocaleDateString() : "-"}</td>`}
           <td class="px-4 py-2">${r.estudianteNombre || "-"}</td>
-          <td class="px-4 py-2">${formatearTipoAsistencia(r.tipo)}</td>
+          <td class="px-4 py-2">${formatearTipoConMotivo(r.tipo, r.motivoSalida)}</td>
           <td class="px-4 py-2">${r.observacion || "-"}</td>
           <td class="px-4 py-2">${r.registradoPor || "-"}</td>
           <td class="px-4 py-2 whitespace-nowrap">
@@ -2506,6 +2826,7 @@ async function cargarReportesConvivenciaGestion() {
     const grado = document.getElementById("reportes-conv-grado").value;
     const grupo = document.getElementById("reportes-conv-grupo").value;
     const tipo = document.getElementById("reportes-conv-estado-filtro").value;
+    const motivoSalida = document.getElementById("reportes-conv-motivo-filtro").value;
     const fechaMes = document.getElementById("reportes-conv-fecha-mes").value;
     const fechaDia = document.getElementById("reportes-conv-fecha-dia").value;
     const busqueda = document.getElementById("reportes-conv-busqueda").value.trim();
@@ -2513,6 +2834,11 @@ async function cargarReportesConvivenciaGestion() {
     if (grado) params.append("grado", grado);
     if (grupo) params.append("grupo", grupo);
     if (tipo) params.append("tipo", tipo);
+    // Filtrar por motivo solo tiene sentido dentro de los permisos.
+    if (motivoSalida) {
+      params.set("tipo", "salida");
+      params.append("motivoSalida", motivoSalida);
+    }
     if (fechaDia) {
       params.append("fechaDesde", fechaDia);
       params.append("fechaHasta", fechaDia);
@@ -2552,10 +2878,25 @@ function editarReporteConvivenciaDesdeReportes(registroId, estudianteId) {
   registroAsistenciaEditando = { registroId: String(registroId), estudianteId: String(estudianteId) };
   document.getElementById("edit-rep-fecha").value = formatearFechaParaInput(reporte.fecha) || obtenerFechaHoy();
   document.getElementById("edit-rep-tipo").value = reporte.tipo || "presente";
+  document.getElementById("edit-rep-motivo").value = reporte.motivoSalida || "";
   document.getElementById("edit-rep-observacion").value = reporte.observacion || "";
   document.getElementById("edit-rep-estado-msg").textContent = "";
   document.getElementById("edit-rep-estado-msg").className = "text-sm";
+  actualizarVisibilidadMotivoEdicion();
   abrirModalEditarReporteConvivenciaGestion();
+}
+
+function actualizarVisibilidadMotivoEdicion() {
+  const tipo = document.getElementById("edit-rep-tipo")?.value;
+  const bloque = document.getElementById("edit-rep-bloque-motivo");
+  if (!bloque) return;
+
+  if (tipo === "salida") {
+    bloque.classList.remove("hidden");
+  } else {
+    bloque.classList.add("hidden");
+    document.getElementById("edit-rep-motivo").value = "";
+  }
 }
 
 async function eliminarReporteConvivenciaDesdeReportes(registroId, estudianteId) {
@@ -2588,10 +2929,16 @@ async function guardarEdicionReporteConvivenciaGestion(event) {
   const payload = {
     fecha: document.getElementById("edit-rep-fecha").value,
     tipo: document.getElementById("edit-rep-tipo").value,
+    motivoSalida: document.getElementById("edit-rep-motivo").value,
     observacion: document.getElementById("edit-rep-observacion").value.trim()
   };
   if (payload.tipo === "salida" && !payload.observacion) {
     estadoMsg.textContent = "La observación es obligatoria para permisos.";
+    estadoMsg.className = "text-sm text-red-600";
+    return;
+  }
+  if (payload.tipo === "salida" && !payload.motivoSalida) {
+    estadoMsg.textContent = "Selecciona el motivo del permiso.";
     estadoMsg.className = "text-sm text-red-600";
     return;
   }
@@ -2640,9 +2987,34 @@ async function cargarEstadisticas() {
     document.getElementById("stat-faltas").textContent = stats.totalFaltas;
     document.getElementById("stat-retardos").textContent = stats.totalRetardos;
     document.getElementById("stat-salidas").textContent = stats.totalSalidas;
+    renderSalidasPorMotivo(stats.salidasPorMotivo);
   } catch (error) {
     console.error("Error al cargar estadisticas:", error);
   }
+}
+
+function renderSalidasPorMotivo(conteo) {
+  const contenedor = document.getElementById("stat-salidas-motivos");
+  if (!contenedor) return;
+
+  const datos = conteo || {};
+  const tarjetas = MOTIVOS_SALIDA.map((motivo) => `
+    <div class="rounded-lg ${motivo.clase} p-3 text-center">
+      <div class="text-2xl font-bold">${datos[motivo.valor] ?? 0}</div>
+      <div class="text-xs font-medium">${motivo.etiqueta}</div>
+    </div>
+  `);
+
+  if (datos.sin_especificar) {
+    tarjetas.push(`
+      <div class="rounded-lg bg-slate-100 text-slate-500 p-3 text-center">
+        <div class="text-2xl font-bold">${datos.sin_especificar}</div>
+        <div class="text-xs font-medium">Sin especificar</div>
+      </div>
+    `);
+  }
+
+  contenedor.innerHTML = tarjetas.join("");
 }
 
 async function cargarReporteGrupo() {
@@ -2738,4 +3110,526 @@ function exportarReporte() {
   link.href = URL.createObjectURL(blob);
   link.download = `reporte_asistencia_${new Date().toISOString().split("T")[0]}.csv`;
   link.click();
+}
+
+// ==================== AÑO LECTIVO ====================
+function setupAnioLectivo() {
+  const btnSimular = document.getElementById("btn-simular-promocion");
+  if (!btnSimular) return;
+
+  btnSimular.addEventListener("click", simularPromocion);
+  document.getElementById("btn-ejecutar-promocion").addEventListener("click", abrirModalConfirmarPromocion);
+  document.getElementById("btn-cerrar-confirmar-promocion").addEventListener("click", cerrarModalConfirmarPromocion);
+  document.getElementById("btn-cancelar-confirmar-promocion").addEventListener("click", cerrarModalConfirmarPromocion);
+  document.getElementById("btn-confirmar-promocion").addEventListener("click", ejecutarPromocion);
+  document.getElementById("btn-recargar-anios").addEventListener("click", cargarAniosLectivos);
+  document.getElementById("btn-cargar-archivo").addEventListener("click", cargarArchivoEstudiantes);
+  document.getElementById("btn-exportar-archivo").addEventListener("click", exportarArchivoCsv);
+  document.getElementById("btn-cerrar-perfil-archivado").addEventListener("click", cerrarModalPerfilArchivado);
+  document.getElementById("archivo-anio").addEventListener("change", cargarArchivoEstudiantes);
+  document.getElementById("archivo-grado").addEventListener("change", cargarArchivoEstudiantes);
+  document.getElementById("archivo-grupo").addEventListener("change", cargarArchivoEstudiantes);
+  document.getElementById("archivo-busqueda").addEventListener("input", cargarArchivoEstudiantes);
+}
+
+function escaparHtml(valor) {
+  return String(valor ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function mostrarEstadoAnioLectivo(mensaje, color = "slate") {
+  const estado = document.getElementById("anio-lectivo-estado");
+  if (!estado) return;
+  estado.textContent = mensaje;
+  estado.className = `text-sm mb-4 text-${color}-600`;
+}
+
+function mostrarEstadoArchivo(mensaje, color = "slate") {
+  const estado = document.getElementById("archivo-estado");
+  if (!estado) return;
+  estado.textContent = mensaje;
+  estado.className = `text-sm mb-3 text-${color}-600`;
+}
+
+async function cargarAniosLectivos() {
+  if (usuarioActual?.rol !== "admin") return;
+
+  try {
+    const response = await fetch(`${API_URL}/anios-lectivos`, { headers: getHeaders() });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudieron cargar los años lectivos.");
+    }
+
+    aniosLectivosData = data;
+    renderResumenAniosLectivos(data);
+
+    const inputArchivar = document.getElementById("anio-archivar");
+    const inputNuevo = document.getElementById("anio-nuevo");
+    if (inputArchivar && !inputArchivar.value) {
+      inputArchivar.value = data.anioActivo || data.sugerencia?.anioActual || "";
+    }
+    if (inputNuevo && !inputNuevo.value) {
+      const base = Number(String(inputArchivar?.value || "").split("-")[1]);
+      inputNuevo.value = Number.isFinite(base)
+        ? `${base}-${base + 1}`
+        : (data.sugerencia?.anioNuevo || "");
+    }
+
+    const selectAnio = document.getElementById("archivo-anio");
+    if (selectAnio) {
+      const seleccionPrevia = selectAnio.value;
+      const archivados = Array.isArray(data.archivados) ? data.archivados : [];
+      selectAnio.innerHTML = archivados.length
+        ? archivados.map((item) => `<option value="${escaparHtml(item.anio)}">${escaparHtml(item.anio)} (${item.totalEstudiantes} estudiantes)</option>`).join("")
+        : '<option value="">No hay años archivados todavía</option>';
+
+      if (seleccionPrevia && archivados.some((item) => item.anio === seleccionPrevia)) {
+        selectAnio.value = seleccionPrevia;
+      }
+      if (selectAnio.value) {
+        cargarArchivoEstudiantes();
+      } else {
+        archivoEstudiantesActual = [];
+        renderTablaArchivo([]);
+        mostrarEstadoArchivo("Todavía no hay años archivados. El primer archivo se crea al cerrar el año.", "slate");
+      }
+    }
+  } catch (error) {
+    mostrarEstadoAnioLectivo(error.message, "red");
+  }
+}
+
+function renderResumenAniosLectivos(data) {
+  const contenedor = document.getElementById("anios-lectivos-resumen");
+  if (!contenedor) return;
+
+  const tarjetas = [
+    `<div class="rounded-lg border border-blue-200 bg-blue-50 p-4">
+       <p class="text-xs uppercase text-blue-700 font-semibold">Año en curso</p>
+       <p class="text-2xl font-bold text-blue-800">${escaparHtml(data.anioActivo || "-")}</p>
+       <p class="text-sm text-blue-700">${data.totalEstudiantesActivos ?? 0} estudiantes activos</p>
+     </div>`
+  ];
+
+  (data.archivados || []).forEach((item) => {
+    const fecha = item.fechaArchivado ? new Date(item.fechaArchivado).toLocaleDateString() : "-";
+    tarjetas.push(`
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <p class="text-xs uppercase text-slate-500 font-semibold">Archivado</p>
+        <p class="text-2xl font-bold text-slate-800">${escaparHtml(item.anio)}</p>
+        <p class="text-sm text-slate-600">${item.totalEstudiantes} estudiantes · ${item.totalRegistrosAsistencia || 0} registros</p>
+        <p class="text-xs text-slate-500">Cerrado el ${fecha}${item.archivadoPor ? ` por ${escaparHtml(item.archivadoPor)}` : ""}</p>
+      </div>
+    `);
+  });
+
+  contenedor.innerHTML = tarjetas.join("");
+}
+
+async function simularPromocion() {
+  if (usuarioActual?.rol !== "admin") return;
+
+  mostrarEstadoAnioLectivo("Calculando simulación...", "slate");
+  try {
+    const response = await fetch(`${API_URL}/anios-lectivos/promocion/preview`, { headers: getHeaders() });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo generar la simulación.");
+    }
+
+    renderSimulacionPromocion(data);
+    mostrarEstadoAnioLectivo(
+      `Simulación lista: ${data.promovidos} estudiante(s) pasan de grado y ${data.graduados} se gradúan de 11°. Nada se ha modificado todavía.`,
+      "blue"
+    );
+  } catch (error) {
+    mostrarEstadoAnioLectivo(error.message, "red");
+  }
+}
+
+function renderSimulacionPromocion(plan) {
+  const contenedor = document.getElementById("promocion-simulacion");
+  if (!contenedor) return;
+
+  const filas = (plan.movimientos || []).map((item) => {
+    const grupos = Object.entries(item.grupos || {})
+      .map(([grupo, total]) => `${grupo}: ${total}`)
+      .join(" · ");
+    let destino = "";
+    let clase = "text-slate-700";
+    if (item.motivo === "graduado") {
+      destino = "Se gradúan (salen de la lista activa)";
+      clase = "text-purple-700 font-semibold";
+    } else if (item.motivo === "promovido") {
+      destino = `Pasan a ${formatearGrado(item.destino)}`;
+      clase = "text-green-700 font-semibold";
+    } else {
+      destino = "Sin grado válido: quedan igual, revísalos";
+      clase = "text-red-700 font-semibold";
+    }
+
+    return `
+      <tr class="border-b">
+        <td class="px-3 py-2 font-medium">${escaparHtml(formatearGrado(item.grado))}</td>
+        <td class="px-3 py-2 text-center">${item.totalEstudiantes}</td>
+        <td class="px-3 py-2 text-xs text-slate-500">${escaparHtml(grupos)}</td>
+        <td class="px-3 py-2 ${clase}">${escaparHtml(destino)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  const avisoSinGrado = (plan.sinGrado || []).length
+    ? `<p class="mt-3 text-sm text-red-700"><i class="fas fa-circle-exclamation mr-1"></i>${plan.sinGrado.length} estudiante(s) sin grado válido no se van a promover: ${escaparHtml(plan.sinGrado.slice(0, 5).map((e) => e.nombre).join(", "))}${plan.sinGrado.length > 5 ? "..." : ""}</p>`
+    : "";
+
+  const avisoArchivo = plan.yaExisteArchivo
+    ? `<p class="mt-3 text-sm text-amber-700"><i class="fas fa-triangle-exclamation mr-1"></i>Ya existe un archivo para ${escaparHtml(plan.sugerencia?.anioActual || "")}. Cambia el año a archivar si vas a cerrar otro año.</p>`
+    : "";
+
+  contenedor.innerHTML = `
+    <p class="font-semibold mb-3">Simulación (todavía no se guarda nada)</p>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50">
+          <tr>
+            <th class="px-3 py-2 text-left">Grado actual</th>
+            <th class="px-3 py-2 text-center">Estudiantes</th>
+            <th class="px-3 py-2 text-left">Grupos</th>
+            <th class="px-3 py-2 text-left">Qué pasa al cerrar el año</th>
+          </tr>
+        </thead>
+        <tbody>${filas || '<tr><td colspan="4" class="px-3 py-4 text-center text-slate-500">No hay estudiantes activos.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <p class="mt-3 text-sm text-slate-600">
+      Se archivarán ${plan.totalEstudiantes} estudiante(s), ${plan.totalRegistrosAsistencia || 0} registro(s) de asistencia
+      y ${plan.totalReportesConvivencia || 0} reporte(s) de convivencia.
+    </p>
+    ${avisoSinGrado}
+    ${avisoArchivo}
+  `;
+  contenedor.classList.remove("hidden");
+}
+
+function abrirModalConfirmarPromocion() {
+  const anioArchivar = document.getElementById("anio-archivar")?.value.trim() || "";
+  const anioNuevo = document.getElementById("anio-nuevo")?.value.trim() || "";
+
+  if (!/^\d{4}-\d{4}$/.test(anioArchivar) || !/^\d{4}-\d{4}$/.test(anioNuevo)) {
+    mostrarEstadoAnioLectivo("Escribe los dos años en formato AAAA-AAAA (ejemplo: 2025-2026 y 2026-2027).", "red");
+    return;
+  }
+
+  const detalle = document.getElementById("confirmar-promocion-detalle");
+  if (detalle) {
+    detalle.innerHTML = `
+      <p class="mb-2">Vas a cerrar el año <strong>${escaparHtml(anioArchivar)}</strong> y abrir <strong>${escaparHtml(anioNuevo)}</strong>.</p>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>Se guarda una copia completa de ${escaparHtml(anioArchivar)} (consultable después).</li>
+        <li>Todos suben un grado: 6°&rarr;7°, 7°&rarr;8°, 8°&rarr;9°, 9°&rarr;10°, 10°&rarr;11°.</li>
+        <li>Los de 11° se gradúan y salen de la lista activa.</li>
+        <li>6° queda vacío para los que llegan de 5°.</li>
+        <li>La asistencia del año viejo se limpia en la lista activa.</li>
+      </ul>
+      <p class="mt-2 font-semibold text-red-700">Esta acción no se puede deshacer desde la aplicación.</p>
+    `;
+  }
+
+  const texto = document.getElementById("confirmar-promocion-texto");
+  if (texto) texto.value = "";
+  const estado = document.getElementById("confirmar-promocion-estado");
+  if (estado) {
+    estado.textContent = "";
+    estado.className = "text-sm mb-3";
+  }
+
+  document.getElementById("modal-confirmar-promocion").classList.remove("hidden");
+}
+
+function cerrarModalConfirmarPromocion() {
+  document.getElementById("modal-confirmar-promocion").classList.add("hidden");
+}
+
+async function ejecutarPromocion() {
+  const anioArchivar = document.getElementById("anio-archivar")?.value.trim() || "";
+  const anioNuevo = document.getElementById("anio-nuevo")?.value.trim() || "";
+  const confirmacion = (document.getElementById("confirmar-promocion-texto")?.value || "").trim().toUpperCase();
+  const estado = document.getElementById("confirmar-promocion-estado");
+  const boton = document.getElementById("btn-confirmar-promocion");
+
+  const mostrarEstadoConfirmacion = (mensaje, color) => {
+    if (!estado) return;
+    estado.textContent = mensaje;
+    estado.className = `text-sm mb-3 text-${color}-600`;
+  };
+
+  if (confirmacion !== "PROMOVER") {
+    mostrarEstadoConfirmacion("Escribe PROMOVER para confirmar.", "red");
+    return;
+  }
+
+  if (boton) {
+    boton.disabled = true;
+    boton.classList.add("opacity-60");
+  }
+  mostrarEstadoConfirmacion("Archivando el año y promoviendo estudiantes. No cierres la ventana...", "slate");
+
+  try {
+    const response = await fetch(`${API_URL}/anios-lectivos/promocion`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ anioLectivo: anioArchivar, anioNuevo, confirmacion: "PROMOVER" })
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo completar el cierre de año.");
+    }
+
+    cerrarModalConfirmarPromocion();
+    mostrarToastGlobal(data.message || "Año archivado correctamente.", "success");
+
+    const pendientes = (data.sinPromover || []).length
+      ? ` ${data.sinPromover.length} estudiante(s) quedaron sin promover por no tener grado válido.`
+      : "";
+    mostrarEstadoAnioLectivo(
+      `Listo: ${data.totalArchivados} estudiante(s) archivados en ${data.anioArchivado}, ` +
+      `${data.promovidos} promovidos y ${data.graduados} graduados de 11°. ` +
+      `6° quedó con ${data.estudiantesEnSexto} estudiante(s), listo para importar a los de 5°.${pendientes}`,
+      "green"
+    );
+
+    document.getElementById("promocion-simulacion")?.classList.add("hidden");
+    await cargarAniosLectivos();
+    await cargarEstudiantes();
+    await cargarEstadisticas();
+  } catch (error) {
+    mostrarEstadoConfirmacion(error.message, "red");
+  } finally {
+    if (boton) {
+      boton.disabled = false;
+      boton.classList.remove("opacity-60");
+    }
+  }
+}
+
+async function cargarArchivoEstudiantes() {
+  if (usuarioActual?.rol !== "admin") return;
+
+  const anio = document.getElementById("archivo-anio")?.value || "";
+  if (!anio) {
+    archivoEstudiantesActual = [];
+    renderTablaArchivo([]);
+    return;
+  }
+
+  const params = new URLSearchParams();
+  const grado = document.getElementById("archivo-grado")?.value || "";
+  const grupo = document.getElementById("archivo-grupo")?.value || "";
+  const busqueda = document.getElementById("archivo-busqueda")?.value.trim() || "";
+  if (grado) params.append("grado", grado);
+  if (grupo) params.append("grupo", grupo);
+  if (busqueda) params.append("busqueda", busqueda);
+
+  mostrarEstadoArchivo("Consultando archivo...", "slate");
+
+  try {
+    const response = await fetch(`${API_URL}/anios-lectivos/${encodeURIComponent(anio)}/estudiantes?${params.toString()}`, {
+      headers: getHeaders()
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo consultar el archivo.");
+    }
+
+    archivoAnioActual = data.anio || anio;
+    archivoEstudiantesActual = Array.isArray(data.estudiantes) ? data.estudiantes : [];
+    renderTablaArchivo(archivoEstudiantesActual);
+    mostrarEstadoArchivo(`Año ${archivoAnioActual}: ${data.total} estudiante(s) encontrados.`, "slate");
+  } catch (error) {
+    archivoEstudiantesActual = [];
+    renderTablaArchivo([]);
+    mostrarEstadoArchivo(error.message, "red");
+  }
+}
+
+function renderTablaArchivo(lista) {
+  const tabla = document.getElementById("tabla-archivo");
+  if (!tabla) return;
+
+  if (!lista.length) {
+    tabla.innerHTML = '<tr><td colspan="10" class="px-4 py-6 text-center text-slate-500">Sin estudiantes para mostrar.</td></tr>';
+    return;
+  }
+
+  tabla.innerHTML = lista.map((estudiante) => `
+    <tr class="border-b hover:bg-slate-50">
+      <td class="px-4 py-2">
+        ${escaparHtml(estudiante.nombre)}
+        ${estudiante.graduado ? '<span class="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">Graduado</span>' : ""}
+      </td>
+      <td class="px-4 py-2">${escaparHtml(estudiante.identificacion)}</td>
+      <td class="px-4 py-2">${escaparHtml(formatearGrado(estudiante.grado))}</td>
+      <td class="px-4 py-2">${escaparHtml(estudiante.grupo)}</td>
+      <td class="px-4 py-2 text-center text-green-700">${estudiante.presentes}</td>
+      <td class="px-4 py-2 text-center text-red-700">${estudiante.faltas}</td>
+      <td class="px-4 py-2 text-center text-yellow-700">${estudiante.retardos}</td>
+      <td class="px-4 py-2 text-center text-purple-700">${estudiante.salidas}</td>
+      <td class="px-4 py-2 text-center">${estudiante.totalReportesConvivencia}</td>
+      <td class="px-4 py-2 text-center">
+        <button data-archivo-id="${escaparHtml(estudiante.id)}" class="btn-ver-archivo text-blue-600 hover:text-blue-800" title="Ver historial">
+          <i class="fas fa-eye"></i>
+        </button>
+      </td>
+    </tr>
+  `).join("");
+
+  tabla.querySelectorAll(".btn-ver-archivo").forEach((boton) => {
+    boton.addEventListener("click", () => verPerfilArchivado(boton.dataset.archivoId));
+  });
+}
+
+async function verPerfilArchivado(estudianteId) {
+  if (!archivoAnioActual || !estudianteId) return;
+
+  const contenedor = document.getElementById("perfil-archivado-contenido");
+  const titulo = document.getElementById("perfil-archivado-titulo");
+  if (contenedor) contenedor.innerHTML = '<p class="text-slate-500">Cargando...</p>';
+  document.getElementById("modal-perfil-archivado").classList.remove("hidden");
+
+  try {
+    const response = await fetch(
+      `${API_URL}/anios-lectivos/${encodeURIComponent(archivoAnioActual)}/estudiantes/${estudianteId}`,
+      { headers: getHeaders() }
+    );
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo cargar el historial archivado.");
+    }
+
+    const est = data.estudiante || {};
+    const resumen = data.resumenAsistencia || {};
+    if (titulo) {
+      titulo.textContent = `${est.nombre || "-"} · ${formatearGrado(est.grado)} ${est.grupo || ""} · ${data.anioLectivo}`;
+    }
+
+    const filasHistorial = (data.historial || []).map((registro) => `
+      <tr class="border-b">
+        <td class="px-3 py-2">${registro.fecha ? new Date(registro.fecha).toLocaleDateString() : "-"}</td>
+        <td class="px-3 py-2">${escaparHtml(formatearTipoConMotivo(registro.tipo, registro.motivoSalida))}</td>
+        <td class="px-3 py-2">${escaparHtml(registro.hora || "-")}</td>
+        <td class="px-3 py-2">${escaparHtml(registro.observacion || "-")}</td>
+        <td class="px-3 py-2">${escaparHtml(registro.registradoPor || "-")}</td>
+      </tr>
+    `).join("");
+
+    const filasConvivencia = (data.reportesConvivencia || []).map((reporte) => `
+      <tr class="border-b">
+        <td class="px-3 py-2">${reporte.fecha ? new Date(reporte.fecha).toLocaleDateString() : "-"}</td>
+        <td class="px-3 py-2">${escaparHtml(reporte.categoria || "-")}</td>
+        <td class="px-3 py-2 ${obtenerClaseGravedadConvivencia(reporte.gravedad)}">${escaparHtml(formatearGravedadConvivencia(reporte.gravedad))}</td>
+        <td class="px-3 py-2">${escaparHtml(reporte.estado || "-")}</td>
+        <td class="px-3 py-2">${escaparHtml(reporte.descripcion || "-")}</td>
+      </tr>
+    `).join("");
+
+    contenedor.innerHTML = `
+      <div class="rounded-lg border border-slate-200 p-4 bg-slate-50">
+        <p><strong>Identificación:</strong> ${escaparHtml(est.identificacion || "-")}</p>
+        <p><strong>Grado y grupo en ${escaparHtml(data.anioLectivo)}:</strong> ${escaparHtml(formatearGrado(est.grado))} ${escaparHtml(est.grupo || "")}</p>
+        <p><strong>Al cerrar el año:</strong> ${est.graduado ? "Graduado de 11°" : `Pasó a ${escaparHtml(formatearGrado(est.gradoSiguiente))}`}</p>
+        <p><strong>Acudiente:</strong> ${escaparHtml(est.padre?.nombre || est.madre?.nombre || est.tutor?.nombre || "No registrado")}</p>
+        <p><strong>Teléfono:</strong> ${escaparHtml(est.telefono || est.padre?.telefono || est.madre?.telefono || "-")}</p>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="rounded-lg border p-3 text-center"><p class="text-xs text-slate-500">Presentes</p><p class="text-xl font-bold text-green-700">${resumen.presentes ?? 0}</p></div>
+        <div class="rounded-lg border p-3 text-center"><p class="text-xs text-slate-500">Faltas</p><p class="text-xl font-bold text-red-700">${resumen.faltas ?? 0}</p></div>
+        <div class="rounded-lg border p-3 text-center"><p class="text-xs text-slate-500">Retardos</p><p class="text-xl font-bold text-yellow-700">${resumen.retardos ?? 0}</p></div>
+        <div class="rounded-lg border p-3 text-center"><p class="text-xs text-slate-500">Permisos</p><p class="text-xl font-bold text-purple-700">${resumen.salidas ?? 0}</p></div>
+      </div>
+
+      ${construirDesglosePermisosHTML(resumen.salidasPorMotivo)}
+
+      <div>
+        <h3 class="font-semibold mb-2">Historial de asistencia (${(data.historial || []).length})</h3>
+        <div class="overflow-x-auto max-h-64 overflow-y-auto border rounded-lg">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 sticky top-0">
+              <tr>
+                <th class="px-3 py-2 text-left">Fecha</th>
+                <th class="px-3 py-2 text-left">Tipo</th>
+                <th class="px-3 py-2 text-left">Hora</th>
+                <th class="px-3 py-2 text-left">Observación</th>
+                <th class="px-3 py-2 text-left">Registró</th>
+              </tr>
+            </thead>
+            <tbody>${filasHistorial || '<tr><td colspan="5" class="px-3 py-4 text-center text-slate-500">Sin registros.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <h3 class="font-semibold mb-2">Reportes de convivencia (${(data.reportesConvivencia || []).length})</h3>
+        <div class="overflow-x-auto max-h-64 overflow-y-auto border rounded-lg">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 sticky top-0">
+              <tr>
+                <th class="px-3 py-2 text-left">Fecha</th>
+                <th class="px-3 py-2 text-left">Categoría</th>
+                <th class="px-3 py-2 text-left">Gravedad</th>
+                <th class="px-3 py-2 text-left">Estado</th>
+                <th class="px-3 py-2 text-left">Descripción</th>
+              </tr>
+            </thead>
+            <tbody>${filasConvivencia || '<tr><td colspan="5" class="px-3 py-4 text-center text-slate-500">Sin reportes.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } catch (error) {
+    if (contenedor) {
+      contenedor.innerHTML = `<p class="text-red-600">${escaparHtml(error.message)}</p>`;
+    }
+  }
+}
+
+function cerrarModalPerfilArchivado() {
+  document.getElementById("modal-perfil-archivado").classList.add("hidden");
+}
+
+function exportarArchivoCsv() {
+  if (!archivoEstudiantesActual.length) {
+    mostrarEstadoArchivo("No hay datos para exportar.", "red");
+    return;
+  }
+
+  const encabezado = "Nombre,Identificacion,Grado,Grupo,Presentes,Faltas,Retardos,Permisos,ReportesConvivencia,Graduado\n";
+  const filas = archivoEstudiantesActual.map((estudiante) => [
+    `"${String(estudiante.nombre || "").replace(/"/g, '""')}"`,
+    estudiante.identificacion || "",
+    estudiante.grado || "",
+    estudiante.grupo || "",
+    estudiante.presentes,
+    estudiante.faltas,
+    estudiante.retardos,
+    estudiante.salidas,
+    estudiante.totalReportesConvivencia,
+    estudiante.graduado ? "SI" : "NO"
+  ].join(",")).join("\n");
+
+  const blob = new Blob([`﻿${encabezado}${filas}`], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `archivo_${archivoAnioActual}_${new Date().toISOString().split("T")[0]}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
