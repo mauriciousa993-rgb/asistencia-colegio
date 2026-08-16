@@ -1,9 +1,5 @@
- {
+{
   "version": 2,
-  "public": true,
-  "github": {
-    "enabled": true
-  },
   "builds": [
     {
       "src": "frontend/public/**",
