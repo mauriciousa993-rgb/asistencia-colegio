@@ -287,6 +287,9 @@
           <button data-view="convivencia" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900">
             <i class="fas fa-handshake mr-2"></i>Convivencia
           </button>
+          <button data-view="comportamiento" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900">
+            <i class="fas fa-star mr-2"></i>Comportamiento
+          </button>
           <button data-view="reportes" class="tab-btn py-4 px-2 border-b-2 border-transparent text-slate-600 hover:text-slate-900">
             <i class="fas fa-chart-bar mr-2"></i>Reportes
           </button>
@@ -1055,6 +1058,113 @@
             </div>
           </div>
 
+        </div>
+      </div>
+
+      <!-- Comportamiento View -->
+      <div id="view-comportamiento" class="view hidden">
+        <div class="bg-white rounded-xl shadow p-6">
+
+          <div class="mb-5">
+            <h2 class="text-xl font-semibold">
+              <i class="fas fa-star text-amber-500 mr-2"></i>Valoraci&oacute;n de comportamiento
+            </h2>
+            <p class="text-sm text-slate-600">
+              La calcula el sistema sola, con los llamados de atenci&oacute;n Tipo 1, 2 y 3 registrados en Convivencia.
+            </p>
+          </div>
+
+          <details class="mb-5 border border-blue-200 bg-blue-50 rounded-lg overflow-hidden">
+            <summary class="cursor-pointer select-none px-4 py-3 font-semibold text-blue-900 hover:bg-blue-100">
+              &iquest;C&oacute;mo se calcula la valoraci&oacute;n?
+            </summary>
+            <div class="px-4 pb-4 pt-1 text-sm text-blue-900">
+              <p class="mb-2">Cada llamado de atenci&oacute;n suma puntos seg&uacute;n su tipolog&iacute;a:</p>
+              <ul class="list-disc ml-5 mb-3 space-y-1">
+                <li><strong>Tipo 1</strong> (situaci&oacute;n leve): 1 punto</li>
+                <li><strong>Tipo 2</strong> (agresi&oacute;n o acoso escolar): 3 puntos</li>
+                <li><strong>Tipo 3</strong> (presunto delito): 6 puntos</li>
+              </ul>
+              <p class="mb-2">Con esos puntos sale la valoraci&oacute;n:</p>
+              <ul class="list-disc ml-5 space-y-1">
+                <li><strong>Excelente</strong>: sin llamados de atenci&oacute;n.</li>
+                <li><strong>Bueno</strong>: 1 o 2 puntos.</li>
+                <li><strong>Aceptable</strong>: 3 a 5 puntos.</li>
+                <li><strong>Insuficiente</strong>: 6 puntos o m&aacute;s, o cualquier llamado Tipo 3, o dos o m&aacute;s Tipo 2.</li>
+              </ul>
+            </div>
+          </details>
+
+          <div id="comportamiento-resumen" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
+
+          <div class="grid md:grid-cols-5 gap-3 mb-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">Grado</label>
+              <select id="comportamiento-grado" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Todos</option>
+                <option value="6">6&deg;</option>
+                <option value="7">7&deg;</option>
+                <option value="8">8&deg;</option>
+                <option value="9">9&deg;</option>
+                <option value="10">10&deg;</option>
+                <option value="11">11&deg;</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Grupo</label>
+              <select id="comportamiento-grupo" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Todos</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Valoraci&oacute;n</label>
+              <select id="comportamiento-valoracion" class="w-full border border-slate-300 rounded-lg px-4 py-2">
+                <option value="">Todas</option>
+                <option value="insuficiente">Insuficiente</option>
+                <option value="aceptable">Aceptable</option>
+                <option value="bueno">Bueno</option>
+                <option value="excelente">Excelente</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Buscar</label>
+              <input id="comportamiento-busqueda" type="text" placeholder="Nombre o identificaci&oacute;n"
+                class="w-full border border-slate-300 rounded-lg px-4 py-2">
+            </div>
+            <div class="flex items-end gap-2">
+              <button id="btn-cargar-comportamiento" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex-1">
+                Consultar
+              </button>
+              <button id="btn-exportar-comportamiento" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700" title="Exportar a Excel">
+                <i class="fas fa-file-csv"></i>
+              </button>
+            </div>
+          </div>
+
+          <p id="comportamiento-estado" class="text-sm mb-3"></p>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th class="px-4 py-2 text-left">Estudiante</th>
+                  <th class="px-4 py-2 text-left">Grado</th>
+                  <th class="px-4 py-2 text-center">Tipo 1</th>
+                  <th class="px-4 py-2 text-center">Tipo 2</th>
+                  <th class="px-4 py-2 text-center">Tipo 3</th>
+                  <th class="px-4 py-2 text-center">Puntos</th>
+                  <th class="px-4 py-2 text-center">Valoraci&oacute;n</th>
+                  <th class="px-4 py-2 text-left">&Uacute;ltimo llamado</th>
+                  <th class="px-4 py-2 text-center">Ver</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-comportamiento"></tbody>
+            </table>
+          </div>
         </div>
       </div>
 

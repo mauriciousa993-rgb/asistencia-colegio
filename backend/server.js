@@ -23,6 +23,10 @@ const {
   construirPlanPromocion,
   contarRegistrosArchivo
 } = require("./utils/anioLectivo");
+const {
+  VALORACIONES,
+  calcularValoracionComportamiento
+} = require("./utils/comportamiento");
 
 // Logger simple para operaciones críticas
 const logger = {
@@ -161,7 +165,8 @@ const estudianteSchema = new mongoose.Schema({
       // Solo aplica cuando tipo === "salida" (permiso de salida).
       motivoSalida: {
         type: String,
-        enum: ["", "deportivo", "enfermedad", "cita_medica", "familiar", "otro"],
+        enum: ["", "deportivo", "cultural", "academico", "enfermedad", "cita_medica",
+          "calamidad", "familiar", "diligencia", "convivencia", "otro"],
         default: ""
       },
       hora: { type: String },
@@ -435,7 +440,40 @@ function normalizeAttendanceType(value) {
 }
 
 // Motivos validos de un permiso de salida.
-const MOTIVOS_SALIDA = ["deportivo", "enfermedad", "cita_medica", "familiar", "otro"];
+const MOTIVOS_SALIDA = [
+  "deportivo",
+  "cultural",
+  "academico",
+  "enfermedad",
+  "cita_medica",
+  "calamidad",
+  "familiar",
+  "diligencia",
+  "convivencia",
+  "otro"
+];
+
+// Formas alternas de escribir un motivo que igual se aceptan.
+const ALIAS_MOTIVOS_SALIDA = {
+  deporte: "deportivo",
+  deportiva: "deportivo",
+  artistico: "cultural",
+  artistica: "cultural",
+  cultural_artistico: "cultural",
+  pedagogica: "academico",
+  salida_pedagogica: "academico",
+  academica: "academico",
+  medica: "cita_medica",
+  citamedica: "cita_medica",
+  cita_medico: "cita_medica",
+  salud: "enfermedad",
+  enfermo: "enfermedad",
+  calamidad_domestica: "calamidad",
+  tramite: "diligencia",
+  diligencia_familiar: "diligencia",
+  disciplinario: "convivencia",
+  disciplina: "convivencia"
+};
 
 function normalizeMotivoSalida(value) {
   const raw = String(value || "")
@@ -444,9 +482,7 @@ function normalizeMotivoSalida(value) {
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/[\s-]+/g, "_");
-  if (raw === "deporte" || raw === "deportiva") return "deportivo";
-  if (raw === "medica" || raw === "citamedica") return "cita_medica";
-  if (raw === "salud") return "enfermedad";
+  if (ALIAS_MOTIVOS_SALIDA[raw]) return ALIAS_MOTIVOS_SALIDA[raw];
   return MOTIVOS_SALIDA.includes(raw) ? raw : "";
 }
 
@@ -1396,7 +1432,8 @@ app.get("/api/anios-lectivos/:anio/estudiantes/:id", autenticarToken, async (req
       },
       historial,
       reportesConvivencia,
-      resumenAsistencia
+      resumenAsistencia,
+      comportamiento: calcularValoracionComportamiento(reportesConvivencia)
     });
   } catch (error) {
     logger.error(`Error al consultar perfil archivado: ${error.message}`);
@@ -2208,6 +2245,95 @@ app.get("/api/convivencia/reportes", autenticarToken, async (req, res) => {
   }
 });
 
+// Valoracion del comportamiento por salon, calculada con los llamados de atencion.
+app.get("/api/convivencia/comportamiento", autenticarToken, async (req, res) => {
+  try {
+    const { grado, grupo, busqueda, valoracion } = req.query;
+    const scopeFilter = getScopeFilterOrReject(req, res);
+    if (scopeFilter === null) return;
+
+    const filtro = { ...scopeFilter };
+    const gradoNormalizado = normalizeGrade(grado);
+    const grupoNormalizado = normalizeGroup(grupo);
+
+    if (gradoNormalizado) {
+      if (scopeFilter.grado && scopeFilter.grado !== gradoNormalizado) return res.json({ estudiantes: [] });
+      filtro.grado = gradoNormalizado;
+    }
+    if (grupoNormalizado) {
+      if (scopeFilter.grupo && scopeFilter.grupo !== grupoNormalizado) return res.json({ estudiantes: [] });
+      filtro.grupo = grupoNormalizado;
+    }
+    if (busqueda) {
+      filtro.$or = [
+        { nombre: { $regex: busqueda, $options: "i" } },
+        { identificacion: { $regex: busqueda, $options: "i" } }
+      ];
+    }
+
+    const estudiantes = await Estudiante.find(filtro)
+      .select("nombre grado grupo identificacion reportesConvivencia")
+      .lean();
+
+    let lista = estudiantes.map((estudiante) => {
+      const reportes = estudiante.reportesConvivencia || [];
+      const comportamiento = calcularValoracionComportamiento(reportes);
+      const ultimo = [...reportes]
+        .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))[0] || null;
+
+      return {
+        estudianteId: estudiante._id,
+        nombre: estudiante.nombre,
+        identificacion: estudiante.identificacion || "",
+        grado: normalizeGrade(estudiante.grado),
+        grupo: normalizeGroup(estudiante.grupo),
+        ...comportamiento,
+        ultimoLlamado: ultimo
+          ? {
+            fecha: ultimo.fecha,
+            gravedad: normalizeSeverity(ultimo.gravedad),
+            categoria: ultimo.categoria || "convivencia",
+            descripcion: ultimo.descripcion || ""
+          }
+          : null
+      };
+    });
+
+    const valoracionFiltro = String(valoracion || "").trim().toLowerCase();
+    if (valoracionFiltro) {
+      if (!VALORACIONES[valoracionFiltro]) {
+        return res.status(400).json({ error: "Valoracion de comportamiento invalida" });
+      }
+      lista = lista.filter((item) => item.valoracion === valoracionFiltro);
+    }
+
+    // Primero los que necesitan atencion, y dentro de cada nivel por nombre.
+    lista.sort((a, b) => {
+      if (a.orden !== b.orden) return b.orden - a.orden;
+      return a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" });
+    });
+
+    const resumen = Object.keys(VALORACIONES).reduce((acc, clave) => ({ ...acc, [clave]: 0 }), {});
+    lista.forEach((item) => { resumen[item.valoracion] += 1; });
+
+    const totalLlamadosPorTipo = lista.reduce((acc, item) => ({
+      tipo1: acc.tipo1 + item.llamadosPorTipo.tipo1,
+      tipo2: acc.tipo2 + item.llamadosPorTipo.tipo2,
+      tipo3: acc.tipo3 + item.llamadosPorTipo.tipo3
+    }), { tipo1: 0, tipo2: 0, tipo3: 0 });
+
+    return res.json({
+      totalEstudiantes: lista.length,
+      resumen,
+      totalLlamadosPorTipo,
+      estudiantes: lista
+    });
+  } catch (error) {
+    logger.error(`Error al calcular el comportamiento: ${error.message}`);
+    return res.status(500).json({ error: "Error al calcular la valoracion de comportamiento" });
+  }
+});
+
 app.put("/api/convivencia/reportes/:estudianteId/:reporteId", autenticarToken, async (req, res) => {
   try {
     const { estudianteId, reporteId } = req.params;
@@ -2466,7 +2592,8 @@ app.get("/api/perfil/:id", autenticarToken, async (req, res) => {
       historial: historialAnual,
       reportesConvivencia,
       resumenAsistencia,
-      reporteConvivencia
+      reporteConvivencia,
+      comportamiento: calcularValoracionComportamiento(reportesConvivencia)
     });
   } catch (error) {
     res.status(500).json({ error: "Error al obtener perfil" });

@@ -23,6 +23,7 @@ let registroAsistenciaEditando = { registroId: "", estudianteId: "" };
 let toastTimeoutId = null;
 let mesCalendarioSalon = "";
 let calendarioSalonActual = null;
+let comportamientoActual = [];
 let mesCalendariosTablero = "";
 let calendariosMesActual = null;
 let aniosLectivosData = null;
@@ -59,11 +60,36 @@ function formatearTipoAsistencia(tipo) {
 
 const MOTIVOS_SALIDA = [
   { valor: "deportivo", etiqueta: "Deportivo", clase: "bg-blue-100 text-blue-800" },
+  { valor: "cultural", etiqueta: "Cultural o artístico", clase: "bg-fuchsia-100 text-fuchsia-800" },
+  { valor: "academico", etiqueta: "Académico / salida pedagógica", clase: "bg-indigo-100 text-indigo-800" },
   { valor: "enfermedad", etiqueta: "Enfermedad", clase: "bg-red-100 text-red-800" },
   { valor: "cita_medica", etiqueta: "Cita médica", clase: "bg-teal-100 text-teal-800" },
+  { valor: "calamidad", etiqueta: "Calamidad doméstica", clase: "bg-orange-100 text-orange-800" },
   { valor: "familiar", etiqueta: "Familiar", clase: "bg-amber-100 text-amber-800" },
+  { valor: "diligencia", etiqueta: "Diligencia o trámite", clase: "bg-lime-100 text-lime-800" },
+  { valor: "convivencia", etiqueta: "Remisión por convivencia", clase: "bg-rose-100 text-rose-800" },
   { valor: "otro", etiqueta: "Otro", clase: "bg-slate-100 text-slate-700" }
 ];
+
+// Los desplegables de motivo se llenan desde esta lista para que no se
+// desincronicen entre el formulario, el salon, la edicion y los filtros.
+function poblarSelectoresMotivoSalida() {
+  const objetivos = [
+    { id: "motivo-salida", primera: "Seleccionar motivo" },
+    { id: "edit-rep-motivo", primera: "Seleccionar motivo" },
+    { id: "reportes-conv-motivo-filtro", primera: "Permisos: todos los motivos" }
+  ];
+
+  objetivos.forEach(({ id, primera }) => {
+    const select = document.getElementById(id);
+    if (!select) return;
+    const valorPrevio = select.value;
+    select.innerHTML = `<option value="">${primera}</option>` + MOTIVOS_SALIDA
+      .map((motivo) => `<option value="${motivo.valor}">${motivo.etiqueta}</option>`)
+      .join("");
+    if (valorPrevio) select.value = valorPrevio;
+  });
+}
 
 function formatearMotivoSalida(motivo) {
   const encontrado = MOTIVOS_SALIDA.find((item) => item.valor === String(motivo || "").toLowerCase());
@@ -176,6 +202,11 @@ function inicializarEventos() {
 
   // Tablero de calendarios
   setupCalendariosMes();
+
+  // Comportamiento
+  setupComportamiento();
+
+  poblarSelectoresMotivoSalida();
 }
 
 function leerJsonSeguro(response) {
@@ -444,6 +475,8 @@ function cambiarVista(vista) {
     cargarAniosLectivos();
   } else if (vista === "calendarios") {
     cargarCalendariosMes();
+  } else if (vista === "comportamiento") {
+    cargarComportamiento();
   }
 }
 
@@ -2012,7 +2045,7 @@ async function buscarPerfil(id) {
     }
 
     renderResumenAsistenciaPerfil(resumenAsistencia);
-    renderReporteConvivenciaPerfil(reporteConvivencia);
+    renderReporteConvivenciaPerfil(reporteConvivencia, data.comportamiento || null);
   } catch (error) {
     console.error("Error al cargar perfil:", error);
   }
@@ -2065,8 +2098,12 @@ function construirDesglosePermisosHTML(salidasPorMotivo) {
   return `<div class="flex flex-wrap gap-1 ml-4 mb-1">${etiquetas.join("")}</div>`;
 }
 
-function renderReporteConvivenciaPerfil(reporte) {
+function renderReporteConvivenciaPerfil(reporte, comportamiento = null) {
   renderReporteConvivenciaEnContenedor(reporte, "perfil-reporte-convivencia");
+  const contenedor = document.getElementById("perfil-reporte-convivencia");
+  if (contenedor && comportamiento) {
+    contenedor.insertAdjacentHTML("afterbegin", construirValoracionComportamientoHTML(comportamiento));
+  }
 }
 
 function renderReporteConvivenciaEnContenedor(reporte, contenedorId) {
@@ -2096,7 +2133,7 @@ function renderReporteConvivenciaEnContenedor(reporte, contenedorId) {
     .join("");
 
   contenedor.innerHTML = `
-    <p class="text-2xl"><strong>Nivel:</strong> <span class="font-semibold ${colorNivel}">${(reporte.nivel || "bajo").toUpperCase()}</span></p>
+    <p class="text-2xl"><strong>Nivel de riesgo:</strong> <span class="font-semibold ${colorNivel}">${(reporte.nivel || "bajo").toUpperCase()}</span></p>
     <p><strong>Puntaje de riesgo:</strong> ${reporte.puntajeRiesgo ?? 0}</p>
     <p><strong>Total reportes convivencia:</strong> ${reporte.totalReportesConvivencia ?? 0}</p>
     <p><strong>Reportes abiertos/en seguimiento:</strong> ${reporte.reportesAbiertos ?? 0}</p>
@@ -3566,6 +3603,8 @@ async function verPerfilArchivado(estudianteId) {
         <p><strong>Teléfono:</strong> ${escaparHtml(est.telefono || est.padre?.telefono || est.madre?.telefono || "-")}</p>
       </div>
 
+      ${construirValoracionComportamientoHTML(data.comportamiento)}
+
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div class="rounded-lg border p-3 text-center"><p class="text-xs text-slate-500">Presentes</p><p class="text-xl font-bold text-green-700">${resumen.presentes ?? 0}</p></div>
         <div class="rounded-lg border p-3 text-center"><p class="text-xs text-slate-500">Faltas</p><p class="text-xl font-bold text-red-700">${resumen.faltas ?? 0}</p></div>
@@ -3850,4 +3889,196 @@ function abrirSalonDesdeCalendarios(grado, grupo) {
   if (selectGrado) selectGrado.value = grado;
   if (selectGrupo) selectGrupo.value = grupo;
   cargarEstudiantesSalon();
+}
+
+// ==================== COMPORTAMIENTO ====================
+const VALORACIONES_COMPORTAMIENTO = {
+  excelente: { etiqueta: "Excelente", clase: "bg-green-100 text-green-800", borde: "border-green-200 bg-green-50", texto: "text-green-700" },
+  bueno: { etiqueta: "Bueno", clase: "bg-blue-100 text-blue-800", borde: "border-blue-200 bg-blue-50", texto: "text-blue-700" },
+  aceptable: { etiqueta: "Aceptable", clase: "bg-amber-100 text-amber-800", borde: "border-amber-200 bg-amber-50", texto: "text-amber-700" },
+  insuficiente: { etiqueta: "Insuficiente", clase: "bg-red-100 text-red-800", borde: "border-red-200 bg-red-50", texto: "text-red-700" }
+};
+
+function obtenerEstiloValoracion(valoracion) {
+  return VALORACIONES_COMPORTAMIENTO[String(valoracion || "").toLowerCase()]
+    || VALORACIONES_COMPORTAMIENTO.excelente;
+}
+
+function setupComportamiento() {
+  const btnCargar = document.getElementById("btn-cargar-comportamiento");
+  if (!btnCargar) return;
+
+  btnCargar.addEventListener("click", cargarComportamiento);
+  document.getElementById("btn-exportar-comportamiento").addEventListener("click", exportarComportamientoCsv);
+  document.getElementById("comportamiento-grado").addEventListener("change", cargarComportamiento);
+  document.getElementById("comportamiento-grupo").addEventListener("change", cargarComportamiento);
+  document.getElementById("comportamiento-valoracion").addEventListener("change", cargarComportamiento);
+  document.getElementById("comportamiento-busqueda").addEventListener("input", cargarComportamiento);
+}
+
+function mostrarEstadoComportamiento(mensaje, color = "slate") {
+  const estado = document.getElementById("comportamiento-estado");
+  if (!estado) return;
+  estado.textContent = mensaje;
+  estado.className = `text-sm mb-3 text-${color}-600`;
+}
+
+async function cargarComportamiento() {
+  const params = new URLSearchParams();
+  const grado = document.getElementById("comportamiento-grado")?.value || "";
+  const grupo = document.getElementById("comportamiento-grupo")?.value || "";
+  const valoracion = document.getElementById("comportamiento-valoracion")?.value || "";
+  const busqueda = document.getElementById("comportamiento-busqueda")?.value.trim() || "";
+  if (grado) params.append("grado", grado);
+  if (grupo) params.append("grupo", grupo);
+  if (valoracion) params.append("valoracion", valoracion);
+  if (busqueda) params.append("busqueda", busqueda);
+
+  mostrarEstadoComportamiento("Calculando valoraciones...", "slate");
+
+  try {
+    const response = await fetch(`${API_URL}/convivencia/comportamiento?${params.toString()}`, {
+      headers: getHeaders()
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo calcular la valoración de comportamiento.");
+    }
+
+    comportamientoActual = Array.isArray(data.estudiantes) ? data.estudiantes : [];
+    renderResumenComportamiento(data);
+    renderTablaComportamiento(comportamientoActual);
+
+    const llamados = data.totalLlamadosPorTipo || { tipo1: 0, tipo2: 0, tipo3: 0 };
+    mostrarEstadoComportamiento(
+      `${data.totalEstudiantes} estudiante(s). Llamados de atención: ${llamados.tipo1} Tipo 1, ${llamados.tipo2} Tipo 2, ${llamados.tipo3} Tipo 3.`,
+      "slate"
+    );
+  } catch (error) {
+    comportamientoActual = [];
+    renderTablaComportamiento([]);
+    document.getElementById("comportamiento-resumen").innerHTML = "";
+    mostrarEstadoComportamiento(error.message, "red");
+  }
+}
+
+function renderResumenComportamiento(data) {
+  const contenedor = document.getElementById("comportamiento-resumen");
+  if (!contenedor) return;
+
+  const resumen = data.resumen || {};
+  const orden = ["excelente", "bueno", "aceptable", "insuficiente"];
+
+  contenedor.innerHTML = orden.map((clave) => {
+    const estilo = obtenerEstiloValoracion(clave);
+    return `
+      <div class="rounded-lg border ${estilo.borde} p-4 text-center">
+        <div class="text-3xl font-bold ${estilo.texto}">${resumen[clave] ?? 0}</div>
+        <div class="text-xs font-medium text-slate-600 uppercase">${estilo.etiqueta}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderTablaComportamiento(lista) {
+  const tabla = document.getElementById("tabla-comportamiento");
+  if (!tabla) return;
+
+  if (!lista.length) {
+    tabla.innerHTML = '<tr><td colspan="9" class="px-4 py-6 text-center text-slate-500">Sin estudiantes para mostrar.</td></tr>';
+    return;
+  }
+
+  tabla.innerHTML = lista.map((item) => {
+    const estilo = obtenerEstiloValoracion(item.valoracion);
+    const conteo = item.llamadosPorTipo || { tipo1: 0, tipo2: 0, tipo3: 0 };
+    const ultimo = item.ultimoLlamado;
+    const descripcion = String(ultimo?.descripcion || "");
+    const textoUltimo = ultimo
+      ? `${new Date(ultimo.fecha).toLocaleDateString()} · ${escaparHtml(descripcion.slice(0, 45))}${descripcion.length > 45 ? "..." : ""}`
+      : "Sin llamados";
+
+    const celdaTipo = (valor, clase) => valor > 0
+      ? `<td class="px-4 py-2 text-center font-semibold ${clase}">${valor}</td>`
+      : '<td class="px-4 py-2 text-center text-slate-300">0</td>';
+
+    return `
+      <tr class="border-b hover:bg-slate-50">
+        <td class="px-4 py-2">
+          ${escaparHtml(item.nombre)}
+          <div class="text-xs text-slate-500">${escaparHtml(item.identificacion)}</div>
+        </td>
+        <td class="px-4 py-2">${escaparHtml(formatearGrado(item.grado))} ${escaparHtml(item.grupo)}</td>
+        ${celdaTipo(conteo.tipo1, "text-yellow-700")}
+        ${celdaTipo(conteo.tipo2, "text-orange-700")}
+        ${celdaTipo(conteo.tipo3, "text-red-700")}
+        <td class="px-4 py-2 text-center font-semibold">${item.puntaje}</td>
+        <td class="px-4 py-2 text-center">
+          <span class="text-xs font-bold px-2 py-1 rounded ${estilo.clase}">${estilo.etiqueta}</span>
+        </td>
+        <td class="px-4 py-2 text-xs text-slate-600">${textoUltimo}</td>
+        <td class="px-4 py-2 text-center">
+          <button data-comportamiento-id="${escaparHtml(item.estudianteId)}" class="btn-ver-comportamiento text-blue-600 hover:text-blue-800" title="Ver perfil">
+            <i class="fas fa-eye"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  tabla.querySelectorAll(".btn-ver-comportamiento").forEach((boton) => {
+    boton.addEventListener("click", () => {
+      cambiarVista("perfil");
+      buscarPerfil(boton.dataset.comportamientoId);
+    });
+  });
+}
+
+// Tarjeta con la valoración, para mostrarla dentro del perfil del estudiante.
+function construirValoracionComportamientoHTML(comportamiento) {
+  if (!comportamiento) return "";
+  const estilo = obtenerEstiloValoracion(comportamiento.valoracion);
+  const conteo = comportamiento.llamadosPorTipo || { tipo1: 0, tipo2: 0, tipo3: 0 };
+
+  return `
+    <div class="rounded-lg border ${estilo.borde} p-3 mb-3">
+      <div class="flex items-center justify-between gap-2 mb-1">
+        <span class="text-xs uppercase font-semibold text-slate-500">Comportamiento</span>
+        <span class="text-xs font-bold px-2 py-1 rounded ${estilo.clase}">${estilo.etiqueta}</span>
+      </div>
+      <p class="text-sm text-slate-700">${escaparHtml(comportamiento.explicacion || "")}</p>
+      <p class="text-xs text-slate-600 mt-1">
+        Llamados de atención: ${conteo.tipo1} Tipo 1 · ${conteo.tipo2} Tipo 2 · ${conteo.tipo3} Tipo 3
+        (${comportamiento.puntaje} punto(s))
+      </p>
+    </div>
+  `;
+}
+
+function exportarComportamientoCsv() {
+  if (!comportamientoActual.length) {
+    mostrarEstadoComportamiento("No hay datos para exportar.", "red");
+    return;
+  }
+
+  const encabezado = "Nombre,Identificacion,Grado,Grupo,Tipo1,Tipo2,Tipo3,Puntos,Valoracion\n";
+  const filas = comportamientoActual.map((item) => [
+    `"${String(item.nombre || "").replace(/"/g, '""')}"`,
+    item.identificacion || "",
+    item.grado || "",
+    item.grupo || "",
+    item.llamadosPorTipo.tipo1,
+    item.llamadosPorTipo.tipo2,
+    item.llamadosPorTipo.tipo3,
+    item.puntaje,
+    obtenerEstiloValoracion(item.valoracion).etiqueta
+  ].join(",")).join("\n");
+
+  const blob = new Blob([`﻿${encabezado}${filas}`], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `comportamiento_${new Date().toISOString().split("T")[0]}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
