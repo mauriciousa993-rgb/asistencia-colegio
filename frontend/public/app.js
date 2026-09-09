@@ -1036,14 +1036,14 @@ function obtenerEstiloDiaCalendario(dia) {
   if (dia.estado === "fin_de_semana") return "bg-slate-200 text-slate-500";
   if (dia.estado === "registrado") return "bg-green-500 text-white";
   if (dia.estado === "faltante") return "bg-red-500 text-white";
-  if (dia.estado === "pendiente_hoy") return "bg-blue-400 text-white";
+  if (dia.estado === "pendiente") return "bg-blue-400 text-white";
   return "bg-white text-slate-400";
 }
 
 function obtenerIconoDiaCalendario(dia) {
   if (dia.estado === "registrado") return '<i class="fas fa-check text-[10px]"></i>';
   if (dia.estado === "faltante") return '<i class="fas fa-xmark text-[10px]"></i>';
-  if (dia.estado === "pendiente_hoy") return '<i class="fas fa-clock text-[10px]"></i>';
+  if (dia.estado === "pendiente") return '<i class="fas fa-clock text-[10px]"></i>';
   return "";
 }
 
@@ -1064,8 +1064,8 @@ function renderResumenCalendarioSalon(data) {
   if (hoy) {
     const estilos = {
       registrado: ["border-green-300 bg-green-50", "text-green-800", "Asistencia enviada", `${hoy.estudiantesRegistrados} estudiante(s) registrados hoy.`],
-      pendiente_hoy: ["border-blue-300 bg-blue-50", "text-blue-800", "Pendiente", `Tienes plazo hasta las ${data.horaCorte} para subir la asistencia.`],
-      faltante: ["border-red-300 bg-red-50", "text-red-800", "Vencido", `Se pasó de las ${data.horaCorte} y hoy no se ha registrado asistencia.`],
+      pendiente: ["border-blue-300 bg-blue-50", "text-blue-800", "Pendiente", `Tienes plazo hasta las ${data.horaCorte} de mañana para subir la asistencia de hoy.`],
+      faltante: ["border-red-300 bg-red-50", "text-red-800", "Vencido", "Se venció el plazo y este día quedó sin registrar."],
       festivo: ["border-amber-300 bg-amber-50", "text-amber-800", "Festivo", "Hoy es festivo, no hay que registrar."],
       fin_de_semana: ["border-slate-200 bg-slate-50", "text-slate-700", "Fin de semana", "Hoy no hay clases."]
     };
@@ -1099,8 +1099,8 @@ function abrirDetalleDiaCalendario(dia) {
   const horaCorte = calendarioSalonActual?.horaCorte || "16:00";
   const detalles = {
     registrado: ["bg-green-100 text-green-800", "Registrada", `Se registró la asistencia de ${dia.estudiantesRegistrados} estudiante(s), ${dia.registros} registro(s) en total.`],
-    faltante: ["bg-red-100 text-red-800", "Sin registrar", `Este día de clase no tiene asistencia registrada. El plazo era hasta las ${horaCorte}.`],
-    pendiente_hoy: ["bg-blue-100 text-blue-800", "Pendiente", `Todavía no se registra la asistencia de hoy. Hay plazo hasta las ${horaCorte}.`],
+    faltante: ["bg-red-100 text-red-800", "Sin registrar", `Se venció el plazo (hasta las ${horaCorte} del día siguiente) y quedó sin registrar.`],
+    pendiente: ["bg-blue-100 text-blue-800", "Pendiente", `Todavía no se registra, pero hay plazo hasta las ${horaCorte} del día siguiente.`],
     festivo: ["bg-amber-100 text-amber-800", "Festivo", "Día festivo: no se exige registro."],
     fin_de_semana: ["bg-slate-200 text-slate-700", "Fin de semana", "No hay clases este día."],
     futuro: ["bg-slate-100 text-slate-600", "Aún no llega", "Este día todavía no ha llegado."]
@@ -2719,7 +2719,8 @@ async function cargarCumplimientoProfesores() {
     renderCumplimientoProfesores(cumplimientoProfesoresActual);
     actualizarResumenAlertasProfesores(data);
     mostrarEstadoAlertasProfesores(
-      `Mes ${data.mes || mes}: ${data.alertasHoraLimite ?? 0} alerta(s) por hora límite, ${data.pendientesMes ?? 0} profesor(es) con faltantes.`,
+      `Mes ${data.mes || mes}: ${data.pendientesMes ?? 0} profesor(es) con días vencidos. ` +
+      `Cada día se puede subir hasta las ${data.horaCorte || "16:00"} del día siguiente.`,
       (data.alertasHoraLimite || 0) > 0 ? "red" : "amber"
     );
   } catch (error) {
@@ -4028,7 +4029,7 @@ function construirTarjetaSalonCalendario(salon, data) {
 function describirEstadoDia(dia) {
   if (dia.estado === "registrado") return `registrado (${dia.estudiantesRegistrados} estudiante(s))`;
   if (dia.estado === "faltante") return "sin registrar";
-  if (dia.estado === "pendiente_hoy") return "pendiente de hoy";
+  if (dia.estado === "pendiente") return "aún dentro del plazo";
   if (dia.estado === "festivo") return "festivo";
   if (dia.estado === "fin_de_semana") return "fin de semana";
   return "aún no llega";

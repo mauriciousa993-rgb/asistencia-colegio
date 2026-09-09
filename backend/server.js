@@ -46,6 +46,11 @@ const SCHOOL_UTC_OFFSET_HOURS = Number.isFinite(Number(process.env.SCHOOL_UTC_OF
   : -5;
 // Plazo diario para subir la asistencia del dia.
 const SCHOOL_CUTOFF_TIME = process.env.SCHOOL_CUTOFF_TIME || "16:00";
+// Horas de gracia despues de esa hora antes de dar un dia por perdido. Con 24
+// horas, el profesor puede ponerse al dia al dia siguiente sin salir en rojo.
+const SCHOOL_GRACE_HOURS = Number.isFinite(Number(process.env.SCHOOL_GRACE_HOURS))
+  ? Math.max(0, Number(process.env.SCHOOL_GRACE_HOURS))
+  : 24;
 const MONGODB_SERVER_SELECTION_TIMEOUT_MS = Number(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS || 10000);
 const STARTUP_STUDENT_BACKUP = process.env.STARTUP_STUDENT_BACKUP === "true";
 
@@ -1774,18 +1779,31 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
       });
     });
 
-    const diasHabilesEsperados = listBusinessDayKeys(start, fechaCorteMes, holidayConfig);
     const hoyKey = getDateKey(ahora);
     const hoyEsHabil = [1, 2, 3, 4, 5].includes(ahora.getUTCDay());
     const hoyEsFestivo = isHolidayDay(hoyKey, holidayConfig);
     const minutosActuales = (ahora.getUTCHours() * 60) + ahora.getUTCMinutes();
+
+    // Solo se le reclaman al profesor los dias a los que ya se les vencio el
+    // plazo (hora limite + horas de gracia). Los de hoy y ayer siguen abiertos.
+    const contextoPlazo = {
+      limiteExigibleKey: getDateKey(new Date(ahora.getTime() - (SCHOOL_GRACE_HOURS * 60 * 60 * 1000))),
+      limiteExigibleMinutos: (() => {
+        const limite = new Date(ahora.getTime() - (SCHOOL_GRACE_HOURS * 60 * 60 * 1000));
+        return (limite.getUTCHours() * 60) + limite.getUTCMinutes();
+      })(),
+      horaCorteMinutos
+    };
+    const diasHabilesEsperados = listBusinessDayKeys(start, fechaCorteMes, holidayConfig)
+      .filter((dia) => diaYaVencido(dia, contextoPlazo));
 
     const items = profesoresValidos.map((profesor) => {
       const llaveSalon = `${profesor.gradoAsignado}|${profesor.grupoAsignado}`;
       const diasRegistrados = diasConRegistroPorSalon[llaveSalon] || new Set();
       const diasFaltantes = diasHabilesEsperados.filter((dia) => !diasRegistrados.has(dia));
       const tieneRegistroHoy = diasRegistrados.has(hoyKey);
-      const alertaHoraLimite = esMesActual && hoyEsHabil && !hoyEsFestivo && !tieneRegistroHoy && minutosActuales >= horaCorteMinutos;
+      // La alerta salta cuando hay dias a los que ya se les paso el plazo.
+      const alertaHoraLimite = diasFaltantes.length > 0;
       const horaCorteTexto = formatearHoraCorte(horaCorteMinutos);
 
       let estadoHoy = "sin_alerta";
@@ -1794,12 +1812,9 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
         if (tieneRegistroHoy) {
           estadoHoy = "al_dia_hoy";
           mensajeHoy = "Ya registró asistencia del día.";
-        } else if (minutosActuales >= horaCorteMinutos) {
-          estadoHoy = "alerta_hora_limite";
-          mensajeHoy = `No registró asistencia antes de las ${horaCorteTexto}.`;
         } else {
           estadoHoy = "pendiente_antes_de_corte";
-          mensajeHoy = `Aún no registra hoy; tiene plazo hasta las ${horaCorteTexto}.`;
+          mensajeHoy = `Aún no registra hoy; tiene plazo hasta las ${horaCorteTexto} de mañana.`;
         }
       } else if (esMesActual && hoyEsFestivo) {
         estadoHoy = "festivo";
@@ -1844,6 +1859,7 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
       fechaFin: end,
       fechaCorteEvaluada: fechaCorteMes,
       horaCorte: formatearHoraCorte(horaCorteMinutos),
+      horasDeGracia: SCHOOL_GRACE_HOURS,
       hoyEsFestivo,
       festivosConfigurados: holidayConfig.exactDates.size + holidayConfig.recurringMonthDays.size,
       totalProfesores: items.length,
@@ -1865,6 +1881,11 @@ function construirContextoCalendario({ mes, horaCorte, festivos }) {
   // Nunca se evalua mas alla de hoy: en un mes futuro ningun dia puede estar "sin subir".
   const fechaCorteMes = finDeHoy < end ? finDeHoy : end;
 
+  // Un dia solo se puede dar por perdido cuando ya pasaron su hora limite MAS
+  // las horas de gracia. Se calcula corriendo el reloj hacia atras: lo que
+  // quede antes de ese instante ya es exigible.
+  const instanteLimite = new Date(ahora.getTime() - (SCHOOL_GRACE_HOURS * 60 * 60 * 1000));
+
   return {
     monthKey,
     start,
@@ -1874,8 +1895,19 @@ function construirContextoCalendario({ mes, horaCorte, festivos }) {
     fechaCorteKey: getDateKey(fechaCorteMes),
     holidayConfig: parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`),
     horaCorteMinutos: parseHoraCorteMinutos(horaCorte),
-    minutosActuales: (ahora.getUTCHours() * 60) + ahora.getUTCMinutes()
+    minutosActuales: (ahora.getUTCHours() * 60) + ahora.getUTCMinutes(),
+    horasDeGracia: SCHOOL_GRACE_HOURS,
+    limiteExigibleKey: getDateKey(instanteLimite),
+    limiteExigibleMinutos: (instanteLimite.getUTCHours() * 60) + instanteLimite.getUTCMinutes()
   };
+}
+
+// ¿Ya se le acabo el plazo a este dia (hora limite + horas de gracia)?
+function diaYaVencido(dayKey, contexto) {
+  const { limiteExigibleKey, limiteExigibleMinutos, horaCorteMinutos } = contexto;
+  if (dayKey < limiteExigibleKey) return true;
+  if (dayKey > limiteExigibleKey) return false;
+  return horaCorteMinutos <= limiteExigibleMinutos;
 }
 
 // Por cada dia del mes: cuantos registros hay y a cuantos estudiantes distintos cubren.
@@ -1900,7 +1932,7 @@ function agruparRegistrosPorDia(estudiantes, start, end) {
 }
 
 function construirDiasCalendario(registrosPorDia, contexto) {
-  const { start, holidayConfig, hoyKey, fechaCorteKey, horaCorteMinutos, minutosActuales } = contexto;
+  const { start, holidayConfig, hoyKey, fechaCorteKey } = contexto;
   const totalDias = new Date(Date.UTC(
     start.getUTCFullYear(),
     start.getUTCMonth() + 1,
@@ -1925,8 +1957,9 @@ function construirDiasCalendario(registrosPorDia, contexto) {
       estado = "registrado";
     } else if (dayKey > fechaCorteKey) {
       estado = "futuro";
-    } else if (dayKey === hoyKey && minutosActuales < horaCorteMinutos) {
-      estado = "pendiente_hoy";
+    } else if (!diaYaVencido(dayKey, contexto)) {
+      // Todavia esta dentro del plazo: no se le puede reclamar al profesor.
+      estado = "pendiente";
     } else {
       estado = "faltante";
     }
@@ -1945,7 +1978,7 @@ function construirDiasCalendario(registrosPorDia, contexto) {
 }
 
 function resumirDiasCalendario(dias) {
-  const diasHabiles = dias.filter((dia) => ["registrado", "faltante", "pendiente_hoy"].includes(dia.estado));
+  const diasHabiles = dias.filter((dia) => ["registrado", "faltante", "pendiente"].includes(dia.estado));
   const diasRegistrados = dias.filter((dia) => dia.estado === "registrado");
   const diasFaltantes = dias.filter((dia) => dia.estado === "faltante");
 
