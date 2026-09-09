@@ -133,6 +133,12 @@ const estudianteSchema = new mongoose.Schema({
   grado: { type: String, required: true },
   grupo: { type: String, required: true },
   identificacion: { type: String, required: true, unique: true },
+  // Un estudiante retirado sale de las listas del dia a dia, pero conserva
+  // toda su historia. Solo el administrador puede borrarlo de verdad.
+  estado: { type: String, enum: ["activo", "retirado"], default: "activo" },
+  fechaRetiro: { type: Date },
+  motivoRetiro: { type: String, default: "" },
+  retiradoPor: { type: String, default: "" },
   fechaNacimiento: { type: Date },
   direccion: { type: String },
   telefono: { type: String },
@@ -227,6 +233,8 @@ const estudianteArchivadoSchema = new mongoose.Schema({
   historial: { type: Array, default: [] },
   reportesConvivencia: { type: Array, default: [] },
   graduado: { type: Boolean, default: false },
+  retirado: { type: Boolean, default: false },
+  motivoRetiro: { type: String, default: "" },
   gradoSiguiente: { type: String, default: "" },
   fechaArchivado: { type: Date, default: Date.now }
 }, { timestamps: true });
@@ -509,6 +517,14 @@ function getUserScope(reqUser) {
     grado: normalizeGrade(reqUser.gradoAsignado),
     grupo: normalizeGroup(reqUser.grupoAsignado)
   };
+}
+
+// Los estudiantes retirados no aparecen en las listas de trabajo diario.
+// Los registros viejos que ya existan sin este campo cuentan como activos.
+const FILTRO_ACTIVOS = { estado: { $ne: "retirado" } };
+
+function soloActivos(filtro = {}) {
+  return { ...filtro, ...FILTRO_ACTIVOS };
 }
 
 function getScopeFilterOrReject(req, res) {
@@ -862,10 +878,15 @@ app.get("/api/estudiantes", autenticarToken, async (req, res) => {
       ];
     }
 
-    const estudiantes = await Estudiante.find(filtro)
-      .select("nombre grado grupo identificacion")
+    // Por defecto solo se ven los activos; la pestaña de Estudiantes puede
+    // pedir los retirados para poder consultarlos o reingresarlos.
+    const incluirRetirados = String(req.query.incluirRetirados || "") === "true";
+    const filtroFinal = incluirRetirados ? filtro : soloActivos(filtro);
+
+    const estudiantes = await Estudiante.find(filtroFinal)
+      .select("nombre grado grupo identificacion estado fechaRetiro motivoRetiro")
       .sort({ nombre: 1 });
-    
+
     res.json(estudiantes);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener estudiantes" });
@@ -1022,14 +1043,17 @@ app.put("/api/estudiantes/:id", autenticarToken, async (req, res) => {
         return res.status(403).json({ error: "Tu usuario no tiene grado/grupo asignado. Contacta al administrador." });
       }
 
-      const gradoFinal = normalizeGrade(payload.grado || estudiante.grado);
-      const grupoFinal = normalizeGroup(payload.grupo || estudiante.grupo);
-      if (gradoFinal !== scope.grado || grupoFinal !== scope.grupo) {
-        return res.status(403).json({ error: "Solo puedes gestionar estudiantes de tu grado y grupo asignado" });
-      }
+      // El profesor puede editar a los alumnos que hoy estan en su salon, y
+      // tambien pasarlos a otro salon cuando cambian de curso. Lo que no puede
+      // es tocar alumnos que ya no son suyos: eso lo cubre canAccessStudent.
+      if (payload.grado != null) payload.grado = normalizeGrade(payload.grado);
+      if (payload.grupo != null) payload.grupo = normalizeGroup(payload.grupo);
 
-      payload.grado = scope.grado;
-      payload.grupo = scope.grupo;
+      // El estado (retirado / activo) tiene su propio endpoint.
+      delete payload.estado;
+      delete payload.fechaRetiro;
+      delete payload.motivoRetiro;
+      delete payload.retiradoPor;
     } else {
       if (payload.grado != null) payload.grado = normalizeGrade(payload.grado);
       if (payload.grupo != null) payload.grupo = normalizeGroup(payload.grupo);
@@ -1048,6 +1072,87 @@ app.put("/api/estudiantes/:id", autenticarToken, async (req, res) => {
 });
 
 // Eliminar estudiante
+// Retirar un estudiante: sale de las listas pero conserva toda su historia.
+// Lo puede hacer el profesor de su salon, sin borrar nada.
+app.put("/api/estudiantes/:id/retirar", autenticarToken, async (req, res) => {
+  try {
+    const estudiante = await Estudiante.findById(req.params.id);
+    if (!estudiante) {
+      return res.status(404).json({ error: "Estudiante no encontrado" });
+    }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "Solo puedes retirar estudiantes de tu grado y grupo asignado" });
+    }
+    if (estudiante.estado === "retirado") {
+      return res.status(400).json({ error: "Este estudiante ya está retirado." });
+    }
+
+    const motivo = typeof req.body?.motivo === "string" ? req.body.motivo.trim() : "";
+    if (!motivo) {
+      return res.status(400).json({ error: "Escribe el motivo del retiro (por ejemplo: se cambió de colegio)." });
+    }
+
+    estudiante.estado = "retirado";
+    estudiante.fechaRetiro = new Date();
+    estudiante.motivoRetiro = motivo;
+    estudiante.retiradoPor = req.user.nombre || req.user.username || "";
+    await estudiante.save();
+
+    logger.info(
+      `Estudiante retirado por ${req.user.username}: ${estudiante.identificacion} - ${estudiante.nombre} ` +
+      `(${estudiante.grado}${estudiante.grupo}). Motivo: ${motivo}`
+    );
+
+    return res.json({
+      message: "Estudiante retirado. Su historial queda guardado.",
+      estudiante: {
+        id: estudiante._id,
+        nombre: estudiante.nombre,
+        estado: estudiante.estado,
+        fechaRetiro: estudiante.fechaRetiro,
+        motivoRetiro: estudiante.motivoRetiro
+      }
+    });
+  } catch (error) {
+    logger.error(`Error al retirar estudiante ${req.params.id}: ${error.message}`);
+    return res.status(500).json({ error: "Error al retirar estudiante" });
+  }
+});
+
+// Reingresar a un estudiante retirado, por si vuelve al colegio.
+app.put("/api/estudiantes/:id/reingresar", autenticarToken, async (req, res) => {
+  try {
+    const estudiante = await Estudiante.findById(req.params.id);
+    if (!estudiante) {
+      return res.status(404).json({ error: "Estudiante no encontrado" });
+    }
+    if (!canAccessStudent(req.user, estudiante)) {
+      return res.status(403).json({ error: "Solo puedes reingresar estudiantes de tu grado y grupo asignado" });
+    }
+    if (estudiante.estado !== "retirado") {
+      return res.status(400).json({ error: "Este estudiante ya está activo." });
+    }
+
+    estudiante.estado = "activo";
+    estudiante.fechaRetiro = null;
+    estudiante.motivoRetiro = "";
+    estudiante.retiradoPor = "";
+    await estudiante.save();
+
+    logger.info(
+      `Estudiante reingresado por ${req.user.username}: ${estudiante.identificacion} - ${estudiante.nombre}`
+    );
+
+    return res.json({
+      message: "Estudiante reingresado. Vuelve a aparecer en las listas.",
+      estudiante: { id: estudiante._id, nombre: estudiante.nombre, estado: estudiante.estado }
+    });
+  } catch (error) {
+    logger.error(`Error al reingresar estudiante ${req.params.id}: ${error.message}`);
+    return res.status(500).json({ error: "Error al reingresar estudiante" });
+  }
+});
+
 app.delete("/api/estudiantes/:id", autenticarToken, async (req, res) => {
   try {
     if (req.user.rol !== "admin") {
@@ -1083,7 +1188,7 @@ app.get("/api/anios-lectivos", autenticarToken, async (req, res) => {
       EstudianteArchivado.aggregate([
         { $group: { _id: "$anioLectivo", totalEstudiantes: { $sum: 1 } } }
       ]),
-      Estudiante.countDocuments()
+      Estudiante.countDocuments(soloActivos())
     ]);
 
     const conteoPorAnio = new Map(
@@ -1144,7 +1249,7 @@ app.get("/api/anios-lectivos/promocion/preview", autenticarToken, async (req, re
     if (!esAdmin(req, res)) return;
 
     const estudiantes = await Estudiante.find({})
-      .select("nombre identificacion grado grupo historial reportesConvivencia")
+      .select("nombre identificacion grado grupo estado historial reportesConvivencia")
       .lean();
 
     const plan = construirPlanPromocion(estudiantes);
@@ -1221,7 +1326,9 @@ app.post("/api/anios-lectivos/promocion", autenticarToken, async (req, res) => {
         historial: estudiante.historial || [],
         reportesConvivencia: estudiante.reportesConvivencia || [],
         graduado: motivo === "graduado",
-        gradoSiguiente: destino,
+        retirado: estudiante.estado === "retirado",
+        motivoRetiro: estudiante.motivoRetiro || "",
+        gradoSiguiente: estudiante.estado === "retirado" ? "" : destino,
         fechaArchivado
       };
     });
@@ -1238,10 +1345,16 @@ app.post("/api/anios-lectivos/promocion", autenticarToken, async (req, res) => {
     }
 
     const idsGraduados = [];
+    const idsRetirados = [];
     const operacionesPromocion = [];
     const sinPromover = [];
 
     estudiantes.forEach((estudiante) => {
+      // Los retirados ya quedaron archivados; no pasan de grado ni siguen en la lista.
+      if (estudiante.estado === "retirado") {
+        idsRetirados.push(estudiante._id);
+        return;
+      }
       const { destino, motivo } = calcularGradoSiguiente(estudiante.grado);
       if (motivo === "graduado") {
         idsGraduados.push(estudiante._id);
@@ -1270,8 +1383,9 @@ app.post("/api/anios-lectivos/promocion", autenticarToken, async (req, res) => {
       });
     });
 
-    if (idsGraduados.length) {
-      await Estudiante.deleteMany({ _id: { $in: idsGraduados } });
+    const idsQueSalen = [...idsGraduados, ...idsRetirados];
+    if (idsQueSalen.length) {
+      await Estudiante.deleteMany({ _id: { $in: idsQueSalen } });
     }
     if (operacionesPromocion.length) {
       await Estudiante.bulkWrite(operacionesPromocion);
@@ -1311,7 +1425,8 @@ app.post("/api/anios-lectivos/promocion", autenticarToken, async (req, res) => {
 
     logger.warn(
       `Cierre de año ejecutado por ${req.user.username}: ${anioArchivo} -> ${anioSiguiente}. ` +
-      `Archivados: ${estudiantes.length}, graduados (11°): ${idsGraduados.length}, promovidos: ${operacionesPromocion.length}.`
+      `Archivados: ${estudiantes.length}, graduados (11°): ${idsGraduados.length}, ` +
+      `retirados: ${idsRetirados.length}, promovidos: ${operacionesPromocion.length}.`
     );
 
     return res.json({
@@ -1320,6 +1435,7 @@ app.post("/api/anios-lectivos/promocion", autenticarToken, async (req, res) => {
       anioNuevo: anioSiguiente,
       totalArchivados: estudiantes.length,
       graduados: idsGraduados.length,
+      retirados: idsRetirados.length,
       promovidos: operacionesPromocion.length,
       sinPromover,
       totalRegistrosAsistencia: totales.registros,
@@ -1633,9 +1749,9 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
         return { grado, grupo };
       });
 
-    const estudiantes = await Estudiante.find({
+    const estudiantes = await Estudiante.find(soloActivos({
       $or: salonesUnicos.map((salon) => ({ grado: salon.grado, grupo: salon.grupo }))
-    }).select("grado grupo historial");
+    })).select("grado grupo historial");
 
     const diasConRegistroPorSalon = {};
     salonesUnicos.forEach((salon) => {
@@ -1869,7 +1985,7 @@ app.get("/api/asistencia/calendario-salon", autenticarToken, async (req, res) =>
 
     const contexto = construirContextoCalendario({ mes, horaCorte, festivos });
 
-    const estudiantes = await Estudiante.find({ grado: gradoFinal, grupo: grupoFinal })
+    const estudiantes = await Estudiante.find(soloActivos({ grado: gradoFinal, grupo: grupoFinal }))
       .select("historial")
       .lean();
 
@@ -1911,7 +2027,7 @@ app.get("/api/asistencia/calendarios-mes", autenticarToken, async (req, res) => 
     const contexto = construirContextoCalendario({ mes, horaCorte, festivos });
 
     const [estudiantes, profesores] = await Promise.all([
-      Estudiante.find({}).select("grado grupo historial").lean(),
+      Estudiante.find(soloActivos()).select("grado grupo historial").lean(),
       Usuario.find({ rol: "profesor" }).select("nombre gradoAsignado grupoAsignado").lean()
     ]);
 
@@ -2271,7 +2387,7 @@ app.get("/api/convivencia/comportamiento", autenticarToken, async (req, res) => 
       ];
     }
 
-    const estudiantes = await Estudiante.find(filtro)
+    const estudiantes = await Estudiante.find(soloActivos(filtro))
       .select("nombre grado grupo identificacion reportesConvivencia")
       .lean();
 
@@ -2626,7 +2742,7 @@ app.get("/api/reportes/general", autenticarToken, async (req, res) => {
       filtro.grupo = grupoNormalizado;
     }
 
-    const estudiantes = await Estudiante.find(filtro);
+    const estudiantes = await Estudiante.find(soloActivos(filtro));
     
     const reporte = estudiantes.map(estudiante => {
       const historialFiltrado = estudiante.historial.filter(h => {
@@ -2668,7 +2784,7 @@ app.get("/api/reportes/por-grupo", autenticarToken, async (req, res) => {
     const scopeFilter = getScopeFilterOrReject(req, res);
     if (scopeFilter === null) return;
 
-    const estudiantes = await Estudiante.find(scopeFilter);
+    const estudiantes = await Estudiante.find(soloActivos(scopeFilter));
     
     const grupos = {};
     
@@ -2714,7 +2830,7 @@ app.get("/api/reportes/estadisticas", autenticarToken, async (req, res) => {
     const scopeFilter = getScopeFilterOrReject(req, res);
     if (scopeFilter === null) return;
 
-    const estudiantes = await Estudiante.find(scopeFilter);
+    const estudiantes = await Estudiante.find(soloActivos(scopeFilter));
     
     let totalFaltas = 0;
     let totalRetardos = 0;

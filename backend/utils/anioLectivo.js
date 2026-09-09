@@ -53,11 +53,27 @@ function construirPlanPromocion(estudiantes) {
   const porGrado = new Map();
   let graduados = 0;
   let promovidos = 0;
+  let retirados = 0;
   const sinGrado = [];
 
   estudiantes.forEach((estudiante) => {
     const grado = normalizeGrade(estudiante.grado);
     const grupo = normalizeGroup(estudiante.grupo);
+
+    // Un retirado se archiva con el año, pero no pasa de grado.
+    if (estudiante.estado === "retirado") {
+      retirados += 1;
+      const llaveRetirado = grado || "(sin grado)";
+      if (!porGrado.has(llaveRetirado)) {
+        porGrado.set(llaveRetirado, {
+          grado: llaveRetirado, destino: "", motivo: "promovido",
+          totalEstudiantes: 0, retirados: 0, grupos: {}
+        });
+      }
+      porGrado.get(llaveRetirado).retirados += 1;
+      return;
+    }
+
     const { destino, motivo } = calcularGradoSiguiente(grado);
 
     if (motivo === "graduado") graduados += 1;
@@ -78,11 +94,14 @@ function construirPlanPromocion(estudiantes) {
         destino,
         motivo,
         totalEstudiantes: 0,
+        retirados: 0,
         grupos: {}
       });
     }
 
     const fila = porGrado.get(llave);
+    fila.destino = destino;
+    fila.motivo = motivo;
     fila.totalEstudiantes += 1;
     const llaveGrupo = grupo || "-";
     fila.grupos[llaveGrupo] = (fila.grupos[llaveGrupo] || 0) + 1;
@@ -104,6 +123,7 @@ function construirPlanPromocion(estudiantes) {
     totalEstudiantes: estudiantes.length,
     graduados,
     promovidos,
+    retirados,
     sinGrado,
     movimientos
   };

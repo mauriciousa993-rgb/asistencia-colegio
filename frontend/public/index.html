@@ -548,6 +548,10 @@
             </select>
             <input id="busqueda-estudiante" type="text" placeholder="Buscar..." 
               class="border border-slate-300 rounded-lg px-4 py-2 flex-1">
+            <label class="flex items-center gap-2 text-sm whitespace-nowrap">
+              <input id="ver-retirados" type="checkbox" class="w-4 h-4">
+              Ver retirados
+            </label>
           </div>
 
           <div class="overflow-x-auto">
@@ -1392,6 +1396,7 @@
               <option value="B">B</option>
               <option value="C">C</option>
             </select>
+            <p id="est-aviso-salon" class="hidden mt-1 text-xs text-blue-700"></p>
           </div>
           <div>
             <label class="block text-sm font-medium mb-1">Fecha de Nacimiento</label>

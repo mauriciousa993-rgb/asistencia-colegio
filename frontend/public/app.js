@@ -24,6 +24,7 @@ let toastTimeoutId = null;
 let mesCalendarioSalon = "";
 let calendarioSalonActual = null;
 let comportamientoActual = [];
+let listaEstudiantesGestion = [];
 let mesCalendariosTablero = "";
 let calendariosMesActual = null;
 let aniosLectivosData = null;
@@ -1174,6 +1175,8 @@ function setupEstudiantes() {
     document.getElementById("modal-titulo").textContent = "Nuevo Estudiante";
     document.getElementById("form-estudiante").reset();
     document.getElementById("estudiante-id").value = "";
+    // Un profesor solo puede matricular en su propio salon: se le deja fijo.
+    ajustarSalonEnModalEstudiante(true);
     document.getElementById("modal-estudiante").classList.remove("hidden");
   });
   
@@ -1192,6 +1195,7 @@ function setupEstudiantes() {
   document.getElementById("filtro-grado").addEventListener("change", cargarListaEstudiantes);
   document.getElementById("filtro-grupo").addEventListener("change", cargarListaEstudiantes);
   document.getElementById("busqueda-estudiante").addEventListener("input", cargarListaEstudiantes);
+  document.getElementById("ver-retirados").addEventListener("change", cargarListaEstudiantes);
 }
 
 function abrirModalImportarCsv() {
@@ -1328,10 +1332,23 @@ async function cargarListaEstudiantes() {
   const grado = document.getElementById("filtro-grado").value;
   const grupo = document.getElementById("filtro-grupo").value;
   const busqueda = document.getElementById("busqueda-estudiante").value;
-  
+  const verRetirados = document.getElementById("ver-retirados")?.checked;
+
   try {
+    // Esta pantalla trae su propia lista porque es la unica que puede mostrar
+    // a los retirados; el resto de la aplicacion solo trabaja con los activos.
+    const params = new URLSearchParams();
+    if (verRetirados) params.append("incluirRetirados", "true");
+    const respuesta = await fetch(`${API_URL}/estudiantes?${params.toString()}`, {
+      headers: getHeaders()
+    });
+    if (manejarErrorAutenticacion(respuesta)) return;
+    const datos = await leerJsonSeguro(respuesta);
+    if (!respuesta.ok) throw new Error(datos.error || "No se pudo cargar la lista.");
+    listaEstudiantesGestion = Array.isArray(datos) ? datos : [];
+
     const busquedaNormalizada = busqueda.trim().toLowerCase();
-    const lista = estudiantes.filter((est) => {
+    const lista = listaEstudiantesGestion.filter((est) => {
       if (grado && normalizarGrado(est.grado) !== normalizarGrado(grado)) return false;
       if (grupo && normalizarGrupo(est.grupo) !== normalizarGrupo(grupo)) return false;
       if (!busquedaNormalizada) return true;
@@ -1346,27 +1363,84 @@ async function cargarListaEstudiantes() {
     lista.forEach(est => {
       const tr = document.createElement("tr");
       tr.className = "border-b hover:bg-slate-50";
+      const retirado = est.estado === "retirado";
+      const esAdmin = usuarioActual?.rol === "admin";
+
+      // Al retirado se le ofrece reingresar; al activo, retirar.
+      const accionEstado = retirado
+        ? `<button onclick="reingresarEstudiante('${est._id}')" class="text-green-600 hover:text-green-800 mr-2" title="Reingresar al colegio">
+             <i class="fas fa-rotate-left"></i>
+           </button>`
+        : `<button onclick="retirarEstudiante('${est._id}')" class="text-amber-600 hover:text-amber-800 mr-2" title="Retirar del colegio (guarda su historial)">
+             <i class="fas fa-user-minus"></i>
+           </button>`;
+
+      // Borrar de verdad es solo del administrador.
+      const accionEliminar = esAdmin
+        ? `<button onclick="eliminarEstudiante('${est._id}')" class="text-red-600 hover:text-red-800" title="Eliminar definitivamente">
+             <i class="fas fa-trash"></i>
+           </button>`
+        : "";
+
+      tr.className = retirado
+        ? "border-b bg-slate-50 text-slate-400"
+        : "border-b hover:bg-slate-50";
+
       tr.innerHTML = `
-        <td class="px-4 py-2">${est.nombre}</td>
+        <td class="px-4 py-2">
+          ${escaparHtml(est.nombre)}
+          ${retirado ? '<span class="ml-2 text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded">Retirado</span>' : ""}
+          ${retirado && est.motivoRetiro ? `<div class="text-xs text-slate-400">${escaparHtml(est.motivoRetiro)}</div>` : ""}
+        </td>
         <td class="px-4 py-2">${formatearGrado(est.grado)}</td>
         <td class="px-4 py-2">${normalizarGrupo(est.grupo)}</td>
-        <td class="px-4 py-2">${est.identificacion}</td>
-        <td class="px-4 py-2 text-center">
+        <td class="px-4 py-2">${escaparHtml(est.identificacion)}</td>
+        <td class="px-4 py-2 text-center whitespace-nowrap">
           <button onclick="verPerfil('${est._id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Ver perfil">
             <i class="fas fa-eye"></i>
           </button>
           <button onclick="editarEstudiante('${est._id}')" class="text-yellow-600 hover:text-yellow-800 mr-2" title="Editar">
             <i class="fas fa-edit"></i>
           </button>
-          <button onclick="eliminarEstudiante('${est._id}')" class="text-red-600 hover:text-red-800" title="Eliminar">
-            <i class="fas fa-trash"></i>
-          </button>
+          ${accionEstado}
+          ${accionEliminar}
         </td>
       `;
       tbody.appendChild(tr);
     });
   } catch (error) {
     console.error("Error al cargar estudiantes:", error);
+  }
+}
+
+// Al crear, el profesor queda amarrado a su salon. Al editar se le sueltan los
+// selectores para que pueda pasar un alumno a otro salon cuando se cambia.
+function ajustarSalonEnModalEstudiante(esNuevo) {
+  const selectGrado = document.getElementById("est-grado");
+  const selectGrupo = document.getElementById("est-grupo");
+  const aviso = document.getElementById("est-aviso-salon");
+  if (!selectGrado || !selectGrupo) return;
+
+  const esProfesor = usuarioActual?.rol !== "admin";
+  const fijar = esProfesor && esNuevo;
+
+  if (fijar) {
+    selectGrado.value = normalizarGrado(usuarioActual?.gradoAsignado || "");
+    selectGrupo.value = normalizarGrupo(usuarioActual?.grupoAsignado || "");
+  }
+  selectGrado.disabled = fijar;
+  selectGrupo.disabled = fijar;
+
+  if (aviso) {
+    if (fijar) {
+      aviso.textContent = `El estudiante entra a tu salón: ${formatearGrado(selectGrado.value)} ${selectGrupo.value}.`;
+      aviso.classList.remove("hidden");
+    } else if (esProfesor) {
+      aviso.textContent = "Si le cambias el grado o el grupo, el estudiante pasa a ese salón y sale de tu lista.";
+      aviso.classList.remove("hidden");
+    } else {
+      aviso.classList.add("hidden");
+    }
   }
 }
 
@@ -1405,7 +1479,24 @@ async function handleGuardarEstudiante(e) {
   const id = document.getElementById("estudiante-id").value;
   const url = id ? `${API_URL}/estudiantes/${id}` : `${API_URL}/estudiantes`;
   const method = id ? "PUT" : "POST";
-  
+
+  // Si un profesor mueve al alumno fuera de su salon, se le avisa antes:
+  // despues ya no lo vera en su lista.
+  if (id && usuarioActual?.rol !== "admin") {
+    const miGrado = normalizarGrado(usuarioActual?.gradoAsignado || "");
+    const miGrupo = normalizarGrupo(usuarioActual?.grupoAsignado || "");
+    const destinoGrado = normalizarGrado(estudianteData.grado);
+    const destinoGrupo = normalizarGrupo(estudianteData.grupo);
+    if (destinoGrado !== miGrado || destinoGrupo !== miGrupo) {
+      const seguir = confirm(
+        `${estudianteData.nombre} pasará a ${formatearGrado(destinoGrado)} ${destinoGrupo}.\n\n` +
+        "Dejará de aparecer en tu lista y pasará a la del profesor de ese salón. " +
+        "Su historial se va con él.\n\n¿Continuar?"
+      );
+      if (!seguir) return;
+    }
+  }
+
   try {
     const response = await fetch(url, {
       method,
@@ -1435,6 +1526,7 @@ async function editarEstudiante(id) {
     const est = await response.json();
     
     document.getElementById("modal-titulo").textContent = "Editar Estudiante";
+    ajustarSalonEnModalEstudiante(false);
     document.getElementById("estudiante-id").value = est._id;
     document.getElementById("est-nombre").value = est.nombre || "";
     document.getElementById("est-identificacion").value = est.identificacion || "";
@@ -1469,8 +1561,70 @@ async function editarEstudiante(id) {
   }
 }
 
+// Retirar no borra: el estudiante sale de las listas pero conserva su historia.
+async function retirarEstudiante(id) {
+  const est = listaEstudiantesGestion.find((e) => String(e._id) === String(id));
+  const nombre = est?.nombre || "este estudiante";
+
+  const motivo = prompt(
+    `Vas a retirar a ${nombre}.\n\n` +
+    "Sale de la lista y del registro diario de asistencia, pero NO se borra: " +
+    "su historial queda guardado y puedes reingresarlo cuando quieras.\n\n" +
+    "Escribe el motivo (por ejemplo: se cambió de colegio):",
+    ""
+  );
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert("Debes escribir el motivo del retiro.");
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/estudiantes/${id}/retirar`, {
+      method: "PUT",
+      headers: getHeaders(),
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) throw new Error(data.error || "No se pudo retirar al estudiante.");
+
+    await cargarEstudiantes();
+    await cargarListaEstudiantes();
+    mostrarToastGlobal(`${nombre} quedó retirado. Su historial se conserva.`, "success");
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function reingresarEstudiante(id) {
+  const est = listaEstudiantesGestion.find((e) => String(e._id) === String(id));
+  const nombre = est?.nombre || "este estudiante";
+  if (!confirm(`¿Reingresar a ${nombre}? Volverá a aparecer en las listas y en el registro de asistencia.`)) return;
+
+  try {
+    const response = await fetch(`${API_URL}/estudiantes/${id}/reingresar`, {
+      method: "PUT",
+      headers: getHeaders()
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) throw new Error(data.error || "No se pudo reingresar al estudiante.");
+
+    await cargarEstudiantes();
+    await cargarListaEstudiantes();
+    mostrarToastGlobal(`${nombre} volvió a la lista.`, "success");
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function eliminarEstudiante(id) {
-  if (!confirm("Estas seguro de eliminar este estudiante?")) return;
+  if (!confirm(
+    "ELIMINAR DEFINITIVAMENTE a este estudiante.\n\n" +
+    "Se borra junto con toda su asistencia y sus reportes de convivencia, y no hay forma de recuperarlo.\n\n" +
+    "Si solo se fue del colegio, cancela y usa el botón de retirar.\n\n¿Continuar?"
+  )) return;
   
   try {
     const response = await fetch(`${API_URL}/estudiantes/${id}`, {
