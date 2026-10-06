@@ -205,6 +205,26 @@ const estudianteSchema = new mongoose.Schema({
 
 const Estudiante = mongoose.model("Estudiante", estudianteSchema);
 
+
+// Schema de Dia No Escolar: festivos, semanas de receso y jornadas
+// institucionales que el administrador marca desde la aplicacion.
+const diaNoEscolarSchema = new mongoose.Schema({
+  // Rango de fechas 'AAAA-MM-DD'. Un solo dia tiene desde == hasta.
+  desde: { type: String, required: true },
+  hasta: { type: String, required: true },
+  tipo: {
+    type: String,
+    enum: ["festivo", "receso", "institucional", "otro"],
+    default: "festivo"
+  },
+  descripcion: { type: String, default: "" },
+  creadoPor: { type: String, default: "" }
+}, { timestamps: true });
+
+diaNoEscolarSchema.index({ desde: 1, hasta: 1 });
+
+const DiaNoEscolar = mongoose.model("DiaNoEscolar", diaNoEscolarSchema);
+
 // Schema de Año Lectivo (control del cierre y archivo de cada año)
 const anioLectivoSchema = new mongoose.Schema({
   anio: { type: String, required: true, unique: true },
@@ -421,6 +441,57 @@ function isHolidayDay(dateKey, holidayConfig) {
   if (holidayConfig.exactDates?.has(dateKey)) return true;
   const monthDay = dateKey.slice(5);
   return holidayConfig.recurringMonthDays?.has(monthDay);
+}
+
+// Por que un dia no tiene clase, para poder mostrarlo ("Semana de receso").
+function holidayLabel(dateKey, holidayConfig) {
+  return holidayConfig?.detalles?.get(dateKey)?.descripcion || "";
+}
+
+const RE_FECHA_SIMPLE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Convierte un rango 'AAAA-MM-DD'..'AAAA-MM-DD' en la lista de dias que cubre.
+function diasDelRango(desde, hasta, maximoDias = 400) {
+  if (!RE_FECHA_SIMPLE.test(desde) || !RE_FECHA_SIMPLE.test(hasta)) return [];
+  const dias = [];
+  const actual = new Date(`${desde}T00:00:00Z`);
+  const fin = new Date(`${hasta}T00:00:00Z`);
+  if (Number.isNaN(actual.getTime()) || Number.isNaN(fin.getTime()) || fin < actual) return [];
+
+  while (actual <= fin && dias.length < maximoDias) {
+    dias.push(actual.toISOString().slice(0, 10));
+    actual.setUTCDate(actual.getUTCDate() + 1);
+  }
+  return dias;
+}
+
+// Festivos y recesos que el administrador cargo desde la aplicacion.
+async function cargarDiasNoEscolares() {
+  const detalles = new Map();
+  try {
+    const rangos = await DiaNoEscolar.find({}).lean();
+    rangos.forEach((rango) => {
+      diasDelRango(rango.desde, rango.hasta).forEach((dia) => {
+        detalles.set(dia, {
+          tipo: rango.tipo || "festivo",
+          descripcion: rango.descripcion || ""
+        });
+      });
+    });
+  } catch (error) {
+    logger.error(`No se pudieron cargar los dias no escolares: ${error.message}`);
+  }
+  return detalles;
+}
+
+// Junta los festivos de la variable de entorno con los que el administrador
+// cargo en la aplicacion. Los de la aplicacion son los que mandan hoy en dia.
+async function construirConfiguracionFestivos(festivosQuery = "") {
+  const config = parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivosQuery || "")}`);
+  const detalles = await cargarDiasNoEscolares();
+  detalles.forEach((_info, dia) => config.exactDates.add(dia));
+  config.detalles = detalles;
+  return config;
 }
 
 function hasDuplicateConvivenciaReport(estudiante, candidate, excludeReportId = "") {
@@ -1181,6 +1252,127 @@ app.delete("/api/estudiantes/:id", autenticarToken, async (req, res) => {
   }
 });
 
+// ============ ENDPOINTS DE CALENDARIO ESCOLAR ============
+
+// Dias sin clase: festivos, semanas de receso y jornadas institucionales.
+// Los ve cualquier usuario (el calendario de su salon depende de ellos),
+// pero solo el administrador los crea o los borra.
+app.get("/api/calendario-escolar", autenticarToken, async (req, res) => {
+  try {
+    const rangos = await DiaNoEscolar.find({}).sort({ desde: -1 }).lean();
+
+    const lista = rangos.map((rango) => {
+      const dias = diasDelRango(rango.desde, rango.hasta);
+      return {
+        id: rango._id,
+        desde: rango.desde,
+        hasta: rango.hasta,
+        tipo: rango.tipo || "festivo",
+        descripcion: rango.descripcion || "",
+        creadoPor: rango.creadoPor || "",
+        totalDias: dias.length,
+        // Los dias de clase que realmente se perdonan (sin fines de semana).
+        diasHabiles: dias.filter((dia) => {
+          const diaSemana = new Date(`${dia}T00:00:00Z`).getUTCDay();
+          return diaSemana >= 1 && diaSemana <= 5;
+        }).length
+      };
+    });
+
+    return res.json({
+      total: lista.length,
+      festivosDeConfiguracion: SCHOOL_HOLIDAYS || "",
+      dias: lista
+    });
+  } catch (error) {
+    logger.error(`Error al listar el calendario escolar: ${error.message}`);
+    return res.status(500).json({ error: "Error al obtener el calendario escolar" });
+  }
+});
+
+app.post("/api/calendario-escolar", autenticarToken, async (req, res) => {
+  try {
+    if (!esAdmin(req, res)) return;
+
+    const desde = String(req.body?.desde || "").trim();
+    const hasta = String(req.body?.hasta || desde).trim();
+    const tipo = String(req.body?.tipo || "festivo").trim().toLowerCase();
+    const descripcion = String(req.body?.descripcion || "").trim();
+
+    if (!RE_FECHA_SIMPLE.test(desde) || !RE_FECHA_SIMPLE.test(hasta)) {
+      return res.status(400).json({ error: "Las fechas deben tener el formato AAAA-MM-DD." });
+    }
+    if (hasta < desde) {
+      return res.status(400).json({ error: "La fecha final no puede ser anterior a la inicial." });
+    }
+    if (!["festivo", "receso", "institucional", "otro"].includes(tipo)) {
+      return res.status(400).json({ error: "Tipo de día no válido." });
+    }
+    if (!descripcion) {
+      return res.status(400).json({ error: "Escribe para qué es (por ejemplo: Semana de receso)." });
+    }
+
+    const dias = diasDelRango(desde, hasta);
+    if (!dias.length) {
+      return res.status(400).json({ error: "El rango de fechas no es válido." });
+    }
+    if (dias.length > 60) {
+      return res.status(400).json({ error: "El rango no puede pasar de 60 días. Divídelo en varios." });
+    }
+
+    // Evita cargar dos veces el mismo periodo sin darse cuenta.
+    const yaExiste = await DiaNoEscolar.findOne({ desde, hasta });
+    if (yaExiste) {
+      return res.status(409).json({ error: "Ya tienes cargado ese mismo periodo." });
+    }
+
+    const creado = await DiaNoEscolar.create({
+      desde,
+      hasta,
+      tipo,
+      descripcion,
+      creadoPor: req.user.nombre || req.user.username || ""
+    });
+
+    logger.info(
+      `Días sin clase cargados por ${req.user.username}: ${desde} a ${hasta} (${tipo}) - ${descripcion}`
+    );
+
+    return res.status(201).json({
+      message: dias.length === 1
+        ? "Día sin clase guardado."
+        : `${dias.length} días sin clase guardados.`,
+      dia: { id: creado._id, desde, hasta, tipo, descripcion, totalDias: dias.length }
+    });
+  } catch (error) {
+    logger.error(`Error al guardar días sin clase: ${error.message}`);
+    return res.status(500).json({ error: "Error al guardar los días sin clase" });
+  }
+});
+
+app.delete("/api/calendario-escolar/:id", autenticarToken, async (req, res) => {
+  try {
+    if (!esAdmin(req, res)) return;
+
+    const eliminado = await DiaNoEscolar.findByIdAndDelete(req.params.id);
+    if (!eliminado) {
+      return res.status(404).json({ error: "Ese periodo ya no existe." });
+    }
+
+    logger.info(
+      `Días sin clase eliminados por ${req.user.username}: ${eliminado.desde} a ${eliminado.hasta}`
+    );
+
+    return res.json({
+      message: "Periodo eliminado. Esos días vuelven a contar como días de clase.",
+      dia: { desde: eliminado.desde, hasta: eliminado.hasta, descripcion: eliminado.descripcion }
+    });
+  } catch (error) {
+    logger.error(`Error al eliminar días sin clase: ${error.message}`);
+    return res.status(500).json({ error: "Error al eliminar los días sin clase" });
+  }
+});
+
 // ============ ENDPOINTS DE AÑO LECTIVO ============
 
 // Listado de años lectivos (archivados + año en curso)
@@ -1711,7 +1903,7 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
     const finDeHoy = finDelDiaLocal(ahora);
     // Un mes que aun no llega no genera dias faltantes.
     const fechaCorteMes = finDeHoy < end ? finDeHoy : end;
-    const holidayConfig = parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`);
+    const holidayConfig = await construirConfiguracionFestivos(festivos);
     const festivosDelMes = listHolidayDayKeys(start, end, holidayConfig);
 
     const horaCorteMinutos = parseHoraCorteMinutos(horaCorte);
@@ -1862,6 +2054,8 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
       horasDeGracia: SCHOOL_GRACE_HOURS,
       hoyEsFestivo,
       festivosConfigurados: holidayConfig.exactDates.size + holidayConfig.recurringMonthDays.size,
+      // El calendario por profesor los pinta en amarillo; sin esto salian en rojo.
+      festivosDelMes,
       totalProfesores: items.length,
       alertasHoraLimite,
       pendientesMes,
@@ -1873,7 +2067,7 @@ app.get("/api/asistencia/cumplimiento-profesores", autenticarToken, async (req, 
 });
 
 // Contexto compartido por los calendarios: rango del mes, festivos y hora limite.
-function construirContextoCalendario({ mes, horaCorte, festivos }) {
+function construirContextoCalendario({ mes, horaCorte, holidayConfig }) {
   const { monthKey, start, end } = parseMonthRange(mes);
   const ahora = obtenerAhoraLocal();
   const esMesActual = monthKey === getMonthKey(ahora);
@@ -1893,7 +2087,7 @@ function construirContextoCalendario({ mes, horaCorte, festivos }) {
     esMesActual,
     hoyKey: getDateKey(ahora),
     fechaCorteKey: getDateKey(fechaCorteMes),
-    holidayConfig: parseHolidayConfig(`${SCHOOL_HOLIDAYS},${String(festivos || "")}`),
+    holidayConfig,
     horaCorteMinutos: parseHoraCorteMinutos(horaCorte),
     minutosActuales: (ahora.getUTCHours() * 60) + ahora.getUTCMinutes(),
     horasDeGracia: SCHOOL_GRACE_HOURS,
@@ -1969,6 +2163,7 @@ function construirDiasCalendario(registrosPorDia, contexto) {
       dia: numeroDia,
       diaSemana,
       estado,
+      motivo: esFestivo ? holidayLabel(dayKey, holidayConfig) : "",
       esHoy: dayKey === hoyKey,
       registros: detalle ? detalle.registros : 0,
       estudiantesRegistrados: detalle ? detalle.estudiantes.size : 0
@@ -2016,7 +2211,8 @@ app.get("/api/asistencia/calendario-salon", autenticarToken, async (req, res) =>
       return res.status(400).json({ error: "Debes indicar grado y grupo para ver el calendario." });
     }
 
-    const contexto = construirContextoCalendario({ mes, horaCorte, festivos });
+    const holidayConfig = await construirConfiguracionFestivos(festivos);
+    const contexto = construirContextoCalendario({ mes, horaCorte, holidayConfig });
 
     const estudiantes = await Estudiante.find(soloActivos({ grado: gradoFinal, grupo: grupoFinal }))
       .select("historial")
@@ -2057,7 +2253,8 @@ app.get("/api/asistencia/calendarios-mes", autenticarToken, async (req, res) => 
     if (!esAdmin(req, res)) return;
 
     const { mes, horaCorte, festivos } = req.query;
-    const contexto = construirContextoCalendario({ mes, horaCorte, festivos });
+    const holidayConfig = await construirConfiguracionFestivos(festivos);
+    const contexto = construirContextoCalendario({ mes, horaCorte, holidayConfig });
 
     const [estudiantes, profesores] = await Promise.all([
       Estudiante.find(soloActivos()).select("grado grupo historial").lean(),

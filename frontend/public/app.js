@@ -25,6 +25,7 @@ let mesCalendarioSalon = "";
 let calendarioSalonActual = null;
 let comportamientoActual = [];
 let listaEstudiantesGestion = [];
+let diasLibresActuales = [];
 let mesCalendariosTablero = "";
 let calendariosMesActual = null;
 let aniosLectivosData = null;
@@ -206,6 +207,9 @@ function inicializarEventos() {
 
   // Comportamiento
   setupComportamiento();
+
+  // Dias sin clase (festivos y recesos)
+  setupDiasLibres();
 
   poblarSelectoresMotivoSalida();
 }
@@ -476,6 +480,7 @@ function cambiarVista(vista) {
     cargarAniosLectivos();
   } else if (vista === "calendarios") {
     cargarCalendariosMes();
+    cargarDiasLibres();
   } else if (vista === "comportamiento") {
     cargarComportamiento();
   }
@@ -1101,7 +1106,8 @@ function abrirDetalleDiaCalendario(dia) {
     registrado: ["bg-green-100 text-green-800", "Registrada", `Se registró la asistencia de ${dia.estudiantesRegistrados} estudiante(s), ${dia.registros} registro(s) en total.`],
     faltante: ["bg-red-100 text-red-800", "Sin registrar", `Se venció el plazo (hasta las ${horaCorte} del día siguiente) y quedó sin registrar.`],
     pendiente: ["bg-blue-100 text-blue-800", "Pendiente", `Todavía no se registra, pero hay plazo hasta las ${horaCorte} del día siguiente.`],
-    festivo: ["bg-amber-100 text-amber-800", "Festivo", "Día festivo: no se exige registro."],
+    festivo: ["bg-amber-100 text-amber-800", dia.motivo || "Festivo",
+      dia.motivo ? `${dia.motivo}: no hay clase, no se exige registro.` : "Día festivo: no se exige registro."],
     fin_de_semana: ["bg-slate-200 text-slate-700", "Fin de semana", "No hay clases este día."],
     futuro: ["bg-slate-100 text-slate-600", "Aún no llega", "Este día todavía no ha llegado."]
   };
@@ -4030,7 +4036,7 @@ function describirEstadoDia(dia) {
   if (dia.estado === "registrado") return `registrado (${dia.estudiantesRegistrados} estudiante(s))`;
   if (dia.estado === "faltante") return "sin registrar";
   if (dia.estado === "pendiente") return "aún dentro del plazo";
-  if (dia.estado === "festivo") return "festivo";
+  if (dia.estado === "festivo") return dia.motivo || "festivo";
   if (dia.estado === "fin_de_semana") return "fin de semana";
   return "aún no llega";
 }
@@ -4236,4 +4242,166 @@ function exportarComportamientoCsv() {
   link.download = `comportamiento_${new Date().toISOString().split("T")[0]}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+// ==================== DÍAS SIN CLASE ====================
+const TIPOS_DIA_LIBRE = {
+  festivo: { etiqueta: "Festivo", clase: "bg-amber-100 text-amber-800" },
+  receso: { etiqueta: "Semana de receso", clase: "bg-orange-100 text-orange-800" },
+  institucional: { etiqueta: "Jornada institucional", clase: "bg-sky-100 text-sky-800" },
+  otro: { etiqueta: "Otro", clase: "bg-slate-100 text-slate-700" }
+};
+
+function setupDiasLibres() {
+  const btnGuardar = document.getElementById("btn-guardar-dia-libre");
+  if (!btnGuardar) return;
+
+  btnGuardar.addEventListener("click", guardarDiaLibre);
+  // Si solo se llena "Desde", se asume un día suelto.
+  document.getElementById("dia-libre-desde").addEventListener("change", (e) => {
+    const hasta = document.getElementById("dia-libre-hasta");
+    if (!hasta.value || hasta.value < e.target.value) hasta.value = e.target.value;
+  });
+}
+
+function mostrarEstadoDiaLibre(mensaje, color = "slate") {
+  const estado = document.getElementById("dia-libre-estado");
+  if (!estado) return;
+  estado.textContent = mensaje;
+  estado.className = `text-sm mb-3 text-${color}-600`;
+}
+
+async function cargarDiasLibres() {
+  const contenedor = document.getElementById("lista-dias-libres");
+  if (!contenedor) return;
+
+  try {
+    const response = await fetch(`${API_URL}/calendario-escolar`, { headers: getHeaders() });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) throw new Error(data.error || "No se pudo cargar el calendario escolar.");
+
+    diasLibresActuales = Array.isArray(data.dias) ? data.dias : [];
+    renderDiasLibres(diasLibresActuales);
+
+    const resumen = document.getElementById("calendario-escolar-resumen");
+    if (resumen) {
+      const totalDias = diasLibresActuales.reduce((t, d) => t + d.diasHabiles, 0);
+      resumen.innerHTML =
+        '<i class="fas fa-umbrella-beach mr-2"></i>Días sin clase (festivos y recesos)' +
+        (diasLibresActuales.length
+          ? ` <span class="font-normal">· ${diasLibresActuales.length} periodo(s), ${totalDias} día(s) de clase perdonados</span>`
+          : ' <span class="font-normal">· ninguno cargado</span>');
+    }
+  } catch (error) {
+    mostrarEstadoDiaLibre(error.message, "red");
+  }
+}
+
+function renderDiasLibres(lista) {
+  const contenedor = document.getElementById("lista-dias-libres");
+  if (!contenedor) return;
+
+  if (!lista.length) {
+    contenedor.innerHTML =
+      '<p class="text-sm text-amber-800">Todavía no has cargado ningún día sin clase.</p>';
+    return;
+  }
+
+  contenedor.innerHTML = lista.map((dia) => {
+    const tipo = TIPOS_DIA_LIBRE[dia.tipo] || TIPOS_DIA_LIBRE.otro;
+    const unSoloDia = dia.desde === dia.hasta;
+    const fechas = unSoloDia
+      ? formatearFechaSimple(dia.desde)
+      : `${formatearFechaSimple(dia.desde)} al ${formatearFechaSimple(dia.hasta)}`;
+
+    return `
+      <div class="flex flex-wrap items-center justify-between gap-2 bg-white border border-amber-200 rounded-lg px-3 py-2">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-bold px-2 py-0.5 rounded ${tipo.clase}">${tipo.etiqueta}</span>
+            <span class="font-medium text-slate-800">${escaparHtml(dia.descripcion)}</span>
+          </div>
+          <div class="text-xs text-slate-500">
+            ${escaparHtml(fechas)} ·
+            ${dia.diasHabiles} día(s) de clase${dia.creadoPor ? ` · cargado por ${escaparHtml(dia.creadoPor)}` : ""}
+          </div>
+        </div>
+        <button data-dia-libre="${escaparHtml(dia.id)}"
+          class="btn-borrar-dia-libre text-sm text-red-600 hover:text-red-800" title="Quitar">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
+    `;
+  }).join("");
+
+  contenedor.querySelectorAll(".btn-borrar-dia-libre").forEach((boton) => {
+    boton.addEventListener("click", () => borrarDiaLibre(boton.dataset.diaLibre));
+  });
+}
+
+// '2026-10-05' -> '5 de octubre de 2026'
+function formatearFechaSimple(fecha) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || ""))) return fecha || "-";
+  return new Date(`${fecha}T12:00:00Z`).toLocaleDateString("es-CO", {
+    day: "numeric", month: "long", year: "numeric", timeZone: "UTC"
+  });
+}
+
+async function guardarDiaLibre() {
+  const desde = document.getElementById("dia-libre-desde").value;
+  const hasta = document.getElementById("dia-libre-hasta").value || desde;
+  const tipo = document.getElementById("dia-libre-tipo").value;
+  const descripcion = document.getElementById("dia-libre-descripcion").value.trim();
+
+  if (!desde) {
+    mostrarEstadoDiaLibre("Escoge al menos la fecha de inicio.", "red");
+    return;
+  }
+  if (!descripcion) {
+    mostrarEstadoDiaLibre("Escribe para qué es (por ejemplo: Semana de receso).", "red");
+    return;
+  }
+
+  mostrarEstadoDiaLibre("Guardando...", "slate");
+  try {
+    const response = await fetch(`${API_URL}/calendario-escolar`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ desde, hasta, tipo, descripcion })
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) throw new Error(data.error || "No se pudo guardar.");
+
+    document.getElementById("dia-libre-descripcion").value = "";
+    mostrarEstadoDiaLibre(data.message, "green");
+    await cargarDiasLibres();
+    // Los calendarios cambian de una vez: esos días pasan a amarillo.
+    await cargarCalendariosMes();
+  } catch (error) {
+    mostrarEstadoDiaLibre(error.message, "red");
+  }
+}
+
+async function borrarDiaLibre(id) {
+  const dia = diasLibresActuales.find((d) => String(d.id) === String(id));
+  const nombre = dia?.descripcion || "este periodo";
+  if (!confirm(`¿Quitar "${nombre}"?\n\nEsos días vuelven a contar como días de clase y se les va a pedir asistencia a los profesores.`)) return;
+
+  try {
+    const response = await fetch(`${API_URL}/calendario-escolar/${id}`, {
+      method: "DELETE",
+      headers: getHeaders()
+    });
+    if (manejarErrorAutenticacion(response)) return;
+    const data = await leerJsonSeguro(response);
+    if (!response.ok) throw new Error(data.error || "No se pudo quitar.");
+
+    mostrarEstadoDiaLibre(data.message, "green");
+    await cargarDiasLibres();
+    await cargarCalendariosMes();
+  } catch (error) {
+    mostrarEstadoDiaLibre(error.message, "red");
+  }
 }

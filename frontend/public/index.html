@@ -1189,6 +1189,52 @@
             </div>
           </div>
 
+          <!-- Dias sin clase -->
+          <details id="calendario-escolar" class="mb-5 border border-amber-200 bg-amber-50 rounded-lg overflow-hidden">
+            <summary id="calendario-escolar-resumen" class="cursor-pointer select-none px-4 py-3 font-semibold text-amber-900 hover:bg-amber-100">
+              <i class="fas fa-umbrella-beach mr-2"></i>D&iacute;as sin clase (festivos y recesos)
+            </summary>
+            <div class="px-4 pb-4 pt-2">
+              <p class="text-sm text-amber-900 mb-4">
+                Marca aqu&iacute; los d&iacute;as que no hay clase. Esos d&iacute;as dejan de pedirle asistencia a los
+                profesores y aparecen en amarillo en los calendarios, sin contarles en contra.
+              </p>
+
+              <div class="grid md:grid-cols-5 gap-3 mb-3">
+                <div>
+                  <label class="block text-sm font-medium mb-1">Desde</label>
+                  <input id="dia-libre-desde" type="date" class="w-full border border-slate-300 rounded-lg px-3 py-2">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">Hasta</label>
+                  <input id="dia-libre-hasta" type="date" class="w-full border border-slate-300 rounded-lg px-3 py-2">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">Tipo</label>
+                  <select id="dia-libre-tipo" class="w-full border border-slate-300 rounded-lg px-3 py-2">
+                    <option value="festivo">Festivo</option>
+                    <option value="receso">Semana de receso</option>
+                    <option value="institucional">Jornada institucional</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">&iquest;Para qu&eacute; es?</label>
+                  <input id="dia-libre-descripcion" type="text" placeholder="Ej. Semana de receso de octubre"
+                    class="w-full border border-slate-300 rounded-lg px-3 py-2">
+                </div>
+                <div class="flex items-end">
+                  <button id="btn-guardar-dia-libre" class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 w-full">
+                    Guardar
+                  </button>
+                </div>
+              </div>
+
+              <p id="dia-libre-estado" class="text-sm mb-3"></p>
+              <div id="lista-dias-libres" class="space-y-2"></div>
+            </div>
+          </details>
+
           <div id="calendarios-resumen" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
 
           <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-5 text-xs text-slate-600 border-y py-3">
