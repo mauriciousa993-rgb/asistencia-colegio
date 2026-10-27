@@ -99,3 +99,11 @@ Desktop.ini
 # Temporary files
 *.tmp
 *.temp
+
+# Notas de trabajo locales: no se publican
+/*.md
+!/README.md
+/*.txt
+/*.bat
+/*.ps1
+/*.sh
